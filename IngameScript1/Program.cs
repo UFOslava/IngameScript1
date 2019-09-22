@@ -42,14 +42,38 @@ namespace IngameScript
         //
         // to learn more about ingame scripts.
 
-        private List<IMyTextSurface> outputLcdList;
-        private string outputLcdListPattern = "[LiftLCD]";
-        private List<IMyLandingGear> bottomLandingGearsList;
-        private List<IMyLandingGear> topLandingGearsList;
-        private IMyShipConnector bottomConnector = null;
-        private string bottomConnectorPattern = "[TopConn]";
-        private IMyShipConnector topConnector = null;
-        private IMyProgrammableBlock cruiseControlProgrammableBlock = null;
+        public List<IMyTextSurface> outputLcdList;
+        public string outputLcdListPattern = "[LiftLCD]";
+        public List<IMyLandingGear> bottomLandingGearsList;
+        public List<IMyLandingGear> topLandingGearsList;
+        public IMyShipConnector bottomConnector = null;
+        public string bottomConnectorPattern = "[TopConn]";
+        public IMyShipConnector topConnector = null;
+        public IMyProgrammableBlock cruiseControlProgrammableBlock = null;
+        public static List<IMyTerminalBlock> TerminalBlockList = new List<IMyTerminalBlock>();//declare an empty list of TerminalBlocks for later use in searches.
+        public static List<IMyTerminalBlock> TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>();// T:
+
+        public List<IMyTerminalBlock> GetBlocksByPattern(string Pattern) {
+            List<IMyTerminalBlock> ReturnList = new List<IMyTerminalBlock>();
+            
+            if (Pattern.StartsWith("T:")) {//Return current grid Blocks only, by name.
+                Pattern = Pattern.Substring(2);//Update pattern with T: removed.
+                foreach (IMyTerminalBlock Block in TerminalBlockListCurrentGrid) {
+                    if (Block.CustomName.Contains(Pattern)) ReturnList.Add(Block);
+                }
+                return ReturnList;
+            }
+
+            if (Pattern.StartsWith("G:")) {//Return all group Blocks
+                GridTerminalSystem.GetBlockGroupWithName(Pattern.Substring(2)).GetBlocks(ReturnList);
+                return ReturnList;
+            }
+            foreach (IMyTerminalBlock Block in TerminalBlockListCurrentGrid)
+            {
+                if (Block.CustomName.Contains(Pattern)) ReturnList.Add(Block);
+            }
+            return ReturnList;
+        }
 
         //parse Custom Data
         public static void ParseCustomData(IMyTerminalBlock block, Dictionary<string, string> cfg, bool clr = true) {
@@ -94,26 +118,26 @@ namespace IngameScript
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
 
             //update block records
-            List<IMyTerminalBlock> TerminalBlock_list = new List<IMyTerminalBlock>();//declare an empty list of TerminalBlocks for later use in searches.
-            List<IMyTerminalBlock> MyTerminalBlock_list = new List<IMyTerminalBlock>();
-            GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(TerminalBlock_list);//Acquire all "Smart" blocks
-            foreach (IMyTerminalBlock Block in TerminalBlock_list) {
-                if filterThis(Block) MyTerminalBlock_list.Add(Block);
+
+            GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(TerminalBlockList);//Acquire all "Smart" blocks
+            foreach (IMyTerminalBlock Block in TerminalBlockList) {
+                if (filterThis(Block)) TerminalBlockListCurrentGrid.Add(Block);//Get Blocks of current Grid.
             }
 
-            for (int i = 0; i < TerminalBlock_list.Count; i++) {
-                if (TerminalBlock_list[i].CustomName.Contains(LCD_Name))
+
+            for (int i = 0; i < TerminalBlockList.Count; i++) {
+                if (TerminalBlockList[i].CustomName.Contains(LCD_Name))
                 {
-                    if (TerminalBlock_list[i].BlockDefinition.ToString().Contains("ProgrammableBlock"))
+                    if (TerminalBlockList[i].BlockDefinition.ToString().Contains("ProgrammableBlock"))
                     {
-                        IMyProgrammableBlock block = (IMyProgrammableBlock)TerminalBlock_list[i];
+                        IMyProgrammableBlock block = (IMyProgrammableBlock)TerminalBlockList[i];
                         outputLcdList.Add(block.GetSurface(0));
                     }
                     else
-                        outputLcdList.Add((IMyTextSurface)TerminalBlock_list[i]);
+                        outputLcdList.Add((IMyTextSurface)TerminalBlockList[i]);
 
-                    if (TerminalBlock_list[i].CustomName.Contains(my_Cockpit_name))
-                        my_Cockpit = (IMyCockpit)TerminalBlock_list[i];
+                    if (TerminalBlockList[i].CustomName.Contains(my_Cockpit_name))
+                        my_Cockpit = (IMyCockpit)TerminalBlockList[i];
                 }
             }
         }
