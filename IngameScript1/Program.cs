@@ -42,6 +42,43 @@ namespace IngameScript
         //
         // to learn more about ingame scripts.
 
+        private List<IMyTextSurface> outputLcdList;
+        private string outputLcdListPattern = "[LiftLCD]";
+        private List<IMyLandingGear> bottomLandingGearsList;
+        private List<IMyLandingGear> topLandingGearsList;
+        private IMyShipConnector bottomConnector = null;
+        private string bottomConnectorPattern = "[TopConn]";
+        private IMyShipConnector topConnector = null;
+        private IMyProgrammableBlock cruiseControlProgrammableBlock = null;
+
+        //parse Custom Data
+        public static void ParseCustomData(IMyTerminalBlock block, Dictionary<string, string> cfg, bool clr = true) {
+            if (clr) {
+                cfg.Clear();
+            }
+
+            string[] CustomDataLines = block.CustomData.Split(new char[] {'\r', '\n'}, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < CustomDataLines.Length; i++) {
+                string line = CustomDataLines[i];
+                string value;
+
+                int pos = line.IndexOf('=');
+                if (pos > -1) {
+                    value = line.Substring(pos + 1);
+                    line = line.Substring(0, pos);
+                } else {
+                    value = "";
+                }
+
+                cfg[line.Trim()] = line.Trim();
+            }
+        }
+
+        bool filterThis(IMyTerminalBlock block)
+        {
+            return block.CubeGrid == Me.CubeGrid;
+        }
+
         public Program()
         {
             // The constructor, called only once every session and
@@ -54,6 +91,31 @@ namespace IngameScript
             // It's recommended to set Runtime.UpdateFrequency 
             // here, which will allow your script to run itself without a 
             // timer block.
+            Runtime.UpdateFrequency = UpdateFrequency.Update10;
+
+            //update block records
+            List<IMyTerminalBlock> TerminalBlock_list = new List<IMyTerminalBlock>();//declare an empty list of TerminalBlocks for later use in searches.
+            List<IMyTerminalBlock> MyTerminalBlock_list = new List<IMyTerminalBlock>();
+            GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(TerminalBlock_list);//Acquire all "Smart" blocks
+            foreach (IMyTerminalBlock Block in TerminalBlock_list) {
+                if filterThis(Block) MyTerminalBlock_list.Add(Block);
+            }
+
+            for (int i = 0; i < TerminalBlock_list.Count; i++) {
+                if (TerminalBlock_list[i].CustomName.Contains(LCD_Name))
+                {
+                    if (TerminalBlock_list[i].BlockDefinition.ToString().Contains("ProgrammableBlock"))
+                    {
+                        IMyProgrammableBlock block = (IMyProgrammableBlock)TerminalBlock_list[i];
+                        outputLcdList.Add(block.GetSurface(0));
+                    }
+                    else
+                        outputLcdList.Add((IMyTextSurface)TerminalBlock_list[i]);
+
+                    if (TerminalBlock_list[i].CustomName.Contains(my_Cockpit_name))
+                        my_Cockpit = (IMyCockpit)TerminalBlock_list[i];
+                }
+            }
         }
 
         public void Save()
