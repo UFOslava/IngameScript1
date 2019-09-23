@@ -43,15 +43,20 @@ namespace IngameScript
         // to learn more about ingame scripts.
 
         public List<IMyTextSurface> outputLcdList;
-        public string outputLcdListPattern = "[LiftLCD]";
         public List<IMyLandingGear> bottomLandingGearsList;
         public List<IMyLandingGear> topLandingGearsList;
         public IMyShipConnector bottomConnector = null;
-        public string bottomConnectorPattern = "[TopConn]";
-        public IMyShipConnector topConnector = null;
-        public IMyProgrammableBlock cruiseControlProgrammableBlock = null;
+        public IMyShipConnector TopConnector = null;
+        public IMyProgrammableBlock CruiseControlProgrammableBlock = null;
         public static List<IMyTerminalBlock> TerminalBlockList = new List<IMyTerminalBlock>();//declare an empty list of TerminalBlocks for later use in searches.
         public static List<IMyTerminalBlock> TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>();// T:
+        public Dictionary<string, string> SettingsDictionary = new Dictionary<string, string>() {
+            {"Output LCD Name","T:Status LCD"},
+            {"Top Floor Connector","T:Top Connector"},
+            {"Bottom Floor Connector","T:Bottom Connector"},
+            {"Cruise Control PB","T:Cruise Control"}
+        };
+
 
         public List<IMyTerminalBlock> GetBlocksByPattern(string Pattern) {
             List<IMyTerminalBlock> ReturnList = new List<IMyTerminalBlock>();
@@ -76,31 +81,48 @@ namespace IngameScript
         }
 
         //parse Custom Data
-        public static void ParseCustomData(IMyTerminalBlock block, Dictionary<string, string> cfg, bool clr = true) {
-            if (clr) {
-                cfg.Clear();
-            }
-
-            string[] CustomDataLines = block.CustomData.Split(new char[] {'\r', '\n'}, StringSplitOptions.RemoveEmptyEntries);
+        public static Dictionary<string,string> ParseCustomData(IMyTerminalBlock Block, Dictionary<string,string> Settings) {
+            Dictionary<string,string> CustomData = new Dictionary<string, string>();
+            string[] CustomDataLines = Block.CustomData.Split(new char[] {'\r', '\n'}, StringSplitOptions.RemoveEmptyEntries);
             for (int i = 0; i < CustomDataLines.Length; i++) {
                 string line = CustomDataLines[i];
                 string value;
 
                 int pos = line.IndexOf('=');
                 if (pos > -1) {
-                    value = line.Substring(pos + 1);
-                    line = line.Substring(0, pos);
+                    value = line.Substring(pos + 1).Trim();
+                    line = line.Substring(0, pos).Trim();
                 } else {
                     value = "";
                 }
-
-                cfg[line.Trim()] = line.Trim();
+                if(Settings.ContainsKey(line)) CustomData.Add(line,value);
+                else {
+                    CustomData.Add(line, Settings[line]);
+                    Block.CustomData += "\n" + line + " = " + Settings[line];
+                }
             }
+
+            return CustomData;
         }
 
-        bool filterThis(IMyTerminalBlock block)
+        bool FilterThis(IMyTerminalBlock block)
         {
             return block.CubeGrid == Me.CubeGrid;
+        }
+
+        void RescanBlocks() {
+            //reset Block lists
+            SettingsDictionary = ParseCustomData(Me,SettingsDictionary);
+            TerminalBlockList = new List<IMyTerminalBlock>();
+            TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>();
+
+            GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(TerminalBlockList);//Acquire all "Smart" blocks
+            foreach (IMyTerminalBlock Block in TerminalBlockList)
+            {
+                if (FilterThis(Block)) TerminalBlockListCurrentGrid.Add(Block);//Get Blocks of current Grid.
+            }
+            //Find specific Blocks
+            outputLcdList = GetBlocksByPattern(SettingsDictionary["Output LCD Name"]);
         }
 
         public Program()
@@ -118,26 +140,22 @@ namespace IngameScript
             Runtime.UpdateFrequency = UpdateFrequency.Update10;
 
             //update block records
+            Dictionary<string, string> customData = ParseCustomData(Me, TODO);//Scan my Custom Data
+            RescanBlocks();
 
-            GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(TerminalBlockList);//Acquire all "Smart" blocks
-            foreach (IMyTerminalBlock Block in TerminalBlockList) {
-                if (filterThis(Block)) TerminalBlockListCurrentGrid.Add(Block);//Get Blocks of current Grid.
-            }
-
-
-            for (int i = 0; i < TerminalBlockList.Count; i++) {
-                if (TerminalBlockList[i].CustomName.Contains(LCD_Name))
+            for (int i = 0; i < TerminalBlockListCurrentGrid.Count; i++) {
+                if (TerminalBlockListCurrentGrid[i].CustomName.Contains(LCD_Name))
                 {
-                    if (TerminalBlockList[i].BlockDefinition.ToString().Contains("ProgrammableBlock"))
+                    if (TerminalBlockListCurrentGrid[i].BlockDefinition.ToString().Contains("ProgrammableBlock"))
                     {
-                        IMyProgrammableBlock block = (IMyProgrammableBlock)TerminalBlockList[i];
+                        IMyProgrammableBlock block = (IMyProgrammableBlock)TerminalBlockListCurrentGrid[i];
                         outputLcdList.Add(block.GetSurface(0));
                     }
                     else
-                        outputLcdList.Add((IMyTextSurface)TerminalBlockList[i]);
+                        outputLcdList.Add((IMyTextSurface)TerminalBlockListCurrentGrid[i]);
 
-                    if (TerminalBlockList[i].CustomName.Contains(my_Cockpit_name))
-                        my_Cockpit = (IMyCockpit)TerminalBlockList[i];
+                    if (TerminalBlockListCurrentGrid[i].CustomName.Contains(my_Cockpit_name))
+                        my_Cockpit = (IMyCockpit)TerminalBlockListCurrentGrid[i];
                 }
             }
         }
@@ -163,6 +181,32 @@ namespace IngameScript
             // 
             // The method itself is required, but the arguments above
             // can be removed if not needed.
+
+            switch (updateSource)
+            {
+                case UpdateType.None:
+                    break;
+                case UpdateType.Terminal:
+                    break;
+                case UpdateType.Trigger:
+                    break;
+                case UpdateType.Antenna:
+                    break;
+                case UpdateType.Mod:
+                    break;
+                case UpdateType.Script:
+                    break;
+                case UpdateType.Update1:
+                    break;
+                case UpdateType.Update10:
+                    break;
+                case UpdateType.Update100:
+                    break;
+                case UpdateType.Once:
+                    break;
+                case UpdateType.IGC:
+                    break;
+            }
         }
     }
 }
