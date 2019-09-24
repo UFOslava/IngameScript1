@@ -7,6 +7,7 @@ using System.Collections;
 using System.Linq;
 using System.Text;
 using System;
+using Sandbox.Game.Entities.Blocks;
 using VRage.Collections;
 using VRage.Game.Components;
 using VRage.Game.GUI.TextPanel;
@@ -45,7 +46,7 @@ namespace IngameScript
         public List<IMyTextSurface> outputLcdList;
         public List<IMyLandingGear> bottomLandingGearsList;
         public List<IMyLandingGear> topLandingGearsList;
-        public IMyShipConnector bottomConnector = null;
+        public IMyShipConnector BottomConnector = null;
         public IMyShipConnector TopConnector = null;
         public IMyProgrammableBlock CruiseControlProgrammableBlock = null;
         public static List<IMyTerminalBlock> TerminalBlockList = new List<IMyTerminalBlock>();//declare an empty list of TerminalBlocks for later use in searches.
@@ -122,7 +123,23 @@ namespace IngameScript
                 if (FilterThis(Block)) TerminalBlockListCurrentGrid.Add(Block);//Get Blocks of current Grid.
             }
             //Find specific Blocks
-            outputLcdList = GetBlocksByPattern(SettingsDictionary["Output LCD Name"]);
+            TopConnector = (IMyShipConnector)GetBlocksByPattern(SettingsDictionary["Top Floor Connector"])[0];
+            BottomConnector = (IMyShipConnector)GetBlocksByPattern(SettingsDictionary["Bottom Floor Connector"])[0];
+            CruiseControlProgrammableBlock = (IMyProgrammableBlock) GetBlocksByPattern(SettingsDictionary["Cruise Control PB"])[0];
+            //Output screens
+            outputLcdList = GetTextSurfaces();
+        }
+
+        public List<IMyTextSurface> GetTextSurfaces() {
+            List<IMyTerminalBlock> OutputBlocks = GetBlocksByPattern(SettingsDictionary["Output LCD Name"]);
+            List<IMyTextSurface> OutputList = new List<IMyTextSurface>();
+            foreach (IMyTerminalBlock Block in OutputBlocks) {
+                try{
+                    OutputList.Add(((IMyTextSurfaceProvider)Block).GetSurface(0));
+                }
+                catch (Exception e) {}//stfu, failure is nothing to brag about
+            }
+            //TODO return
         }
 
         public Program()
