@@ -1,0 +1,1244 @@
+//v2.1.1, 2019-06-08, (c) Andrew
+//Все настройки производятся в Свои данные. При необходимоcти измените язык и перекомпилируйте скрипт.
+//All settings are made in Custom Data. At first, change language, then recompile script.
+
+private string CockpitName = "Кокпит";
+private string DisplayName = "Кокпит(0)";
+private int DisplayUpdateInterval = 11;
+private int ThrustUpdateInterval = 7;
+//private bool DisplayRuntimeInfo = false;
+private bool GraphicalOutput = true;
+
+private const double MaxSpeed = 99.99;
+
+IMyShipController ShipController;
+IMyTextSurface TextSurface;
+List<IMyThrust> ForwardThrusters, BackThrusters;
+List<IMyThrust> LongAxisForwardThrusters, LongAxisBackThrusters, VertAxisForwardThrusters, VertAxisBackThrusters;
+
+bool ccIsOn = false;
+
+double DesiredSpeed = 0, ForwardSpeed = 0;
+
+private int DisplayUpdateCounter = 0;
+private double dispUpdFreqInv;
+private int ThrustersUpdateCounter = 0;
+private const int MassUpdateInterval = 180;
+private int MassUpdateCounter = 0;
+
+private double ShipMass;
+private double MaxForwardThrust, MaxBackThrust;
+private double MaxForwardThrustInv, MaxBackThrustInv;
+private double ThrustEfficiency;
+
+private float AccumulatedControlValue = 0;
+private bool mustFixSpeed = false;
+private double deltaV = 0;
+private double GravProjection = 0;
+private bool ThrustForwardIsFree = true, ThrustBackIsFree = true;
+private bool ThrustForwardEnabled = true, ThrustBackEnabled = true;
+private float LastSignalF = 0.0f;
+private float LastSignalB = 0.0f;
+private float EnginePower = 0.0f;
+
+private bool AxisIsVertical = false;
+private bool LongitudinalAxisIsAllowed = true;
+private bool VerticalAxisIsAllowed = true;
+private bool TriplePressingIsAllowed = true;
+
+private TriplePressingDetector macroCmdLongitudinal = new TriplePressingDetector();
+private TriplePressingDetector macroCmdVertical = new TriplePressingDetector();
+
+//в старых версиях использовался Color.White, теперь ScriptForegraundColor. При смене версии скрипта его нужно сделать белым.
+private bool foregraundColorIsSet = false;
+
+private string[] curLang;
+
+private bool initedFlag = false;
+private int initTicksCounter = 0;
+private int initTicksWait;
+private int cmdCounter = 0;
+private double msCounter = 0;
+
+//==========================================================================================================
+
+public Program()
+{
+
+    Random rnd = new Random();
+    initTicksWait = 6 + rnd.Next(6);
+    Runtime.UpdateFrequency = UpdateFrequency.Update10;
+
+}
+private bool ModuleInited()
+{
+    if (initedFlag) return true;
+    if (initTicksCounter < initTicksWait) { initTicksCounter++; return false; }
+    InitModule();
+    initedFlag = true;
+
+    return true;
+}
+private void InitModule()
+{
+
+    StringBuilder sb = new StringBuilder();
+
+    bool firstLaunch = false;
+
+    try
+    {
+        bool settingsNotSet = false;
+        if (!ReadConfig(out firstLaunch))
+        {
+            if (firstLaunch)
+            {
+                sb.AppendLine(curLang[msgNewCfg]);
+            }
+            else
+            {
+                sb.AppendLine(curLang[msgBrokenCfg]);
+            }
+            settingsNotSet = true;
+        }
+
+
+        ShipController = FindBlockOfType<IMyShipController>(CockpitName, GridTerminalSystem, Me);
+        if (ShipController == null)
+        {
+            settingsNotSet = true;
+            sb.AppendLine(curLang[msgCockpitNotfound]);
+            ShipController = FindDefaultCockpit(GridTerminalSystem, Me);
+            if (ShipController != null)
+            {
+                sb.AppendLine(string.Format(curLang[msgDefaultCockpitWasSet], ShipController.CustomName));
+            }
+        }
+
+        TextSurface = FindDisplay(DisplayName, GridTerminalSystem, Me);
+        if (TextSurface == null)
+        {
+            settingsNotSet = true;
+            sb.AppendLine(curLang[msgDisplayNotFound]);
+            if (ShipController != null && ShipController is IMyTextSurfaceProvider)
+            {
+                TextSurface = (ShipController as IMyTextSurfaceProvider).GetSurface(0);
+                sb.AppendLine(string.Format(curLang[msgDefaultDisplayWasSet], ShipController.CustomName + "(0)"));
+            }
+        }
+
+        //анализируем ориентацию движков
+        List<IMyThrust> allTrust = new List<IMyThrust>();
+        GridTerminalSystem.GetBlocksOfType<IMyThrust>(allTrust, th => th.IsSameConstructAs(Me));
+
+        Matrix cocpitMatrix, trustMatrix;
+        ShipController.Orientation.GetMatrix(out cocpitMatrix);
+
+        LongAxisForwardThrusters = new List<IMyThrust>();
+        LongAxisBackThrusters = new List<IMyThrust>();
+        VertAxisForwardThrusters = new List<IMyThrust>();
+        VertAxisBackThrusters = new List<IMyThrust>();
+
+        foreach (IMyThrust trs in allTrust)
+        {
+            trs.Orientation.GetMatrix(out trustMatrix);
+
+            if (trustMatrix.Forward == cocpitMatrix.Forward) LongAxisBackThrusters.Add(trs);
+            else if (trustMatrix.Forward == cocpitMatrix.Backward) LongAxisForwardThrusters.Add(trs);
+            else if (trustMatrix.Forward == cocpitMatrix.Up) VertAxisBackThrusters.Add(trs);
+            else if (trustMatrix.Forward == cocpitMatrix.Down) VertAxisForwardThrusters.Add(trs);
+        }
+
+        DesiredSpeed = 0;
+
+        if (settingsNotSet) sb.AppendLine(curLang[msgSettingsNotSet]); else sb.AppendLine(curLang[msgInitComplete]);
+    }
+    catch
+    {
+        sb.AppendLine(curLang[msgInitError]);
+    }
+    
+    if (!LongitudinalAxisIsAllowed && !VerticalAxisIsAllowed) LongitudinalAxisIsAllowed = true;
+
+    Echo(sb.ToString());
+
+    LoadState();
+
+    //проверка оси
+    if (AxisIsVertical && !VerticalAxisIsAllowed)
+    {
+        AxisIsVertical = false;
+        ccIsOn = false;
+    }
+    if (!AxisIsVertical && !LongitudinalAxisIsAllowed)
+    {
+        AxisIsVertical = true;
+        ccIsOn = false;
+    }
+    double desSpeed = DesiredSpeed;
+    SetAxis(AxisIsVertical);
+    DesiredSpeed = desSpeed;
+
+    dispUpdFreqInv = 1.0 / (double)DisplayUpdateInterval;
+
+    if (TextSurface != null)
+    {
+        if (GraphicalOutput)
+        {
+            //сбрасываем ScriptForegroundColor в белый
+            if (firstLaunch || !foregraundColorIsSet || TextSurface.ContentType != ContentType.SCRIPT || TextSurface.Script != string.Empty) TextSurface.ScriptForegroundColor = Color.White;
+            TextSurface.ContentType = ContentType.SCRIPT;
+            TextSurface.Script = "";
+        }
+        else
+        {
+            TextSurface.ContentType = ContentType.TEXT_AND_IMAGE;
+        }
+    }
+
+    Runtime.UpdateFrequency = UpdateFrequency.Update1;
+
+}
+public void Save()
+{
+    SaveState();
+}
+
+public void Main(string argument, UpdateType updateSource)
+{
+
+    if (!ModuleInited()) return;
+
+    if (!string.IsNullOrEmpty(argument))
+    {
+        switch (argument)
+        {
+            case "cc_onoff":
+                ccIsOn = !ccIsOn;
+                mustFixSpeed = true;
+                if (!ccIsOn)
+                {
+                    SetOverrideForward(true, 0.0f);
+                    SetOverrideBack(true, 0.0f);
+                    LastSignalF = 0.0f;
+                    LastSignalB = 0.0f;
+                }
+                AccumulatedControlValue = 0;
+                break;
+
+            case "cc_on":
+                ccIsOn = true;
+                mustFixSpeed = true;
+                AccumulatedControlValue = 0;
+                break;
+
+            case "cc_off":
+                ccIsOn = false;
+                SetOverrideForward(true, 0.0f);
+                SetOverrideBack(true, 0.0f);
+                AccumulatedControlValue = 0;
+                LastSignalF = 0.0f;
+                LastSignalB = 0.0f;
+                break;
+
+            case "axis_v":
+                if (VerticalAxisIsAllowed && !AxisIsVertical)
+                {
+                    SetAxis(true);
+                    AccumulatedControlValue = 0;
+                }
+                break;
+            
+            case "axis_l":
+                if (LongitudinalAxisIsAllowed && AxisIsVertical)
+                {
+                    SetAxis(false);
+                    AccumulatedControlValue = 0;
+                }
+                break;
+
+            case "axis_switch":
+                if (LongitudinalAxisIsAllowed && VerticalAxisIsAllowed)
+                {
+                    SetAxis(!AxisIsVertical);
+                    AccumulatedControlValue = 0;
+                }
+                break;
+
+            default:
+                if (argument.StartsWith("setspeed "))
+                {
+                    string spdStr = argument.Substring(9);
+                    double spd;
+                    if (double.TryParse(spdStr, out spd))
+                    {
+                        ccIsOn = true;
+                        DesiredSpeed = MathHelperD.Clamp(spd, -MaxSpeed, MaxSpeed);
+                    }
+                }
+                break;
+        }
+        
+        cmdCounter += Runtime.CurrentInstructionCount;
+        msCounter += Runtime.LastRunTimeMs;
+        return;
+    }
+
+    ThrustersUpdateCounter++;
+    if (ThrustersUpdateCounter >= ThrustUpdateInterval)
+    {
+        //нужен пересчет
+        ThrustersUpdateCounter = 0;
+    }
+
+    //читаем управление каждый цикл
+    float ThrottleLong = -ShipController.MoveIndicator.Z;
+    float ThrottleVert = ShipController.MoveIndicator.Y;
+
+    //макрокоманды
+    if (TriplePressingIsAllowed)
+    {
+        if (LongitudinalAxisIsAllowed)
+        {
+            macroCmdLongitudinal.Cycle(ThrottleLong);
+            if (macroCmdLongitudinal.IsTriggered)
+            {
+                if (macroCmdLongitudinal.Cmd == 1)
+                {
+                    SetAxis(false);
+                    ccIsOn = true;
+                    
+                    ThrustersUpdateCounter = 0;
+                    AccumulatedControlValue = 0.0f;
+                    ThrottleLong = 0.0f;
+                }
+                else
+                {
+                    if (!AxisIsVertical)
+                    {
+                        ccIsOn = false;
+                        SetOverrideForward(true, 0.0f);
+                        SetOverrideBack(true, 0.0f);
+                    }
+                    macroCmdLongitudinal.Clear();
+                }
+            }
+        }
+        if (VerticalAxisIsAllowed)
+        {
+            macroCmdVertical.Cycle(ThrottleVert);
+            if (macroCmdVertical.IsTriggered)
+            {
+                if (macroCmdVertical.Cmd == 1)
+                {
+                    SetAxis(true);
+                    ccIsOn = true;
+                    
+                    ThrustersUpdateCounter = 0;
+                    AccumulatedControlValue = 0.0f;
+                    ThrottleVert = 0.0f;
+                }
+                else
+                {
+                    if (AxisIsVertical)
+                    {
+                        ccIsOn = false;
+                        SetOverrideForward(true, 0.0f);
+                        SetOverrideBack(true, 0.0f);
+                    }
+                    macroCmdVertical.Clear();
+                }
+            }
+        }
+    }
+
+    //меряем скорость и гравитацию
+    if (ThrustersUpdateCounter == 0)
+    {
+        Vector3D wordSpeed = ShipController.GetShipVelocities().LinearVelocity;
+        MatrixD invMatrix = MatrixD.Transpose(ShipController.WorldMatrix);
+        Vector3D shipSpeed = Vector3D.Rotate(wordSpeed, invMatrix);
+        Vector3D ProjectionAxis;
+        if (AxisIsVertical)
+        {
+            ProjectionAxis = Vector3D.Up;
+            ForwardSpeed = shipSpeed.Y;
+        }
+        else
+        { 
+            ProjectionAxis = Vector3D.Forward;
+            ForwardSpeed = -shipSpeed.Z;
+        }
+
+        GravProjection = 0.0;
+        Vector3D NaturalG = ShipController.GetNaturalGravity();
+        if (!Vector3D.IsZero(NaturalG))
+        {
+            Vector3D shipGrav = Vector3D.Rotate(NaturalG, invMatrix);
+            GravProjection = shipGrav.Dot(ProjectionAxis);
+        }
+    }
+
+    MassUpdateCounter++;
+    if (MassUpdateCounter >= MassUpdateInterval)
+    {
+        CalculateShipMass();
+    }
+
+    //применяем круиз-контроль
+    if (ccIsOn)
+    {
+        float Throttle = AxisIsVertical ? ThrottleVert : ThrottleLong;
+        AccumulatedControlValue += Throttle;
+
+        //при нажатых кнопках управление должно быть стандартным, без перехвата
+        if (Throttle > 0.0)
+        {
+            //нажата кнопка вперед, освободим движки
+            if (!ThrustForwardIsFree) SetOverrideForward(true, 0.0f);
+            if (ThrustBackEnabled) SetOverrideBack(false, 0.0f);
+            LastSignalF = 1.0f;
+            LastSignalB = 0.0f;
+        }
+        else if (ThrottleLong < 0.0)
+        {
+            //нажата кнопка назад
+            if (ThrustForwardEnabled) SetOverrideForward(false, 0.0f);
+            if (!ThrustBackIsFree) SetOverrideBack(true, 0.0f);
+            LastSignalF = 0.0f;
+            LastSignalB = 1.0f;
+        }
+        else
+        {
+            //кнопки отпущены
+            if (ThrustersUpdateCounter != 0)
+            {
+                if (ThrustForwardIsFree) SetOverrideForward(LastSignalF > 0.0f, LastSignalF);
+                if (ThrustBackIsFree) SetOverrideBack(LastSignalB > 0.0f, LastSignalB);
+            }
+            LastSignalF = 0.0f;
+            LastSignalB = 0.0f;
+        }
+
+        if (ThrustersUpdateCounter == 0)
+        {
+            float ControlValue = (float)Math.Sign(AccumulatedControlValue);
+
+            if (ControlValue != 0.0f)
+            {
+                mustFixSpeed = true;
+                DesiredSpeed = ForwardSpeed;
+            }
+
+            EnginePower = 1.0f;
+            bool throttleIsZero = Throttle == 0.0;
+            if (ControlValue < 0f)
+            {
+                //назад
+                SetOverrideForward(false, 0.0f);
+                if (throttleIsZero) SetOverrideBack(true, ControlValue);
+            }
+            else if (ControlValue > 0f)
+            {
+                //вперед
+                if (throttleIsZero) SetOverrideForward(true, ControlValue);
+                SetOverrideBack(false, 0.0f);
+            }
+            else   //ControlValue == 0
+            {
+                if (TriplePressingIsAllowed)
+                {
+                    TriplePressingDetector macroCmd = AxisIsVertical ? macroCmdVertical : macroCmdLongitudinal;
+                    if (macroCmd.IsTriggered)
+                    {
+                        //макрокоманда
+
+                        if (macroCmd.Cmd == 1)
+                        {
+                            DesiredSpeed = MaxSpeed;
+                        }
+                        else
+                        {
+                            DesiredSpeed = 0.0;
+                        }
+                        macroCmd.Clear();
+                        mustFixSpeed = false;
+                    }
+                }
+
+                if (mustFixSpeed)
+                {
+                    //задаем желаемую скорость
+                    DesiredSpeed = MathHelperD.Clamp(ForwardSpeed, -MaxSpeed, MaxSpeed);
+                    if ((MaxSpeed - DesiredSpeed) < 1.0) DesiredSpeed = MaxSpeed;
+                    mustFixSpeed = false;
+                }
+
+                EnginePower = 0.0f;
+
+                //поддерживаем скорость
+                if ((DesiredSpeed >= MaxSpeed && ForwardSpeed >= MaxSpeed) || (DesiredSpeed <= -MaxSpeed && ForwardSpeed <= -MaxSpeed))
+                {
+                    //если желаемая скорость установлена на максимум, а текущая скорость превышает ее - не тормозим
+                    SetOverrideForward(false, 0.0f);
+                    SetOverrideBack(false, 0.0f);
+                }
+                else
+                {
+                    deltaV = DesiredSpeed - ForwardSpeed;
+
+                    double accel = deltaV * 2.0;   //полсекунды на исправление погрешности скорости
+                    double Force = ShipMass * (accel - GravProjection);
+                    float signalF = 0.0f, signalB = 0.0f;
+                    bool signalFEnable = false, signalBEnable = false;
+                    if (Force > 0.0)
+                    {
+                        signalF = (float)(Force * MaxForwardThrustInv);
+                        if (signalF > 1.0f) signalF = 1.0f;
+                        signalFEnable = true;
+                        EnginePower = signalF;
+                    }
+                    else if (Force < 0.0)
+                    {
+                        signalB = (float)(-Force * MaxBackThrustInv);
+                        if (signalB > 1.0f) signalB = 1.0f;
+                        signalBEnable = true;
+                        EnginePower = signalB;
+                    }
+                    SetOverrideForward(signalFEnable, signalF);
+                    SetOverrideBack(signalBEnable, signalB);
+                }
+            }
+            AccumulatedControlValue = 0;
+
+        }
+    }
+    
+    DisplayUpdateCounter++;
+    if (DisplayUpdateCounter >= DisplayUpdateInterval)
+    {
+        DisplayUpdateCounter = 0;
+
+        if (GraphicalOutput) GraphOutput(); else TextOutput();
+
+        //вывод времени выполнения
+        Echo(curLang[msgInstrPerCycle] + ": " + ((double)cmdCounter * dispUpdFreqInv).ToString("#0.0") 
+            + "\n" + curLang[msgCycleTime] + ": " + (msCounter * dispUpdFreqInv).ToString("#0.0000"));
+            
+        cmdCounter = 0;
+        msCounter = 0.0;
+    }
+
+    cmdCounter += Runtime.CurrentInstructionCount;
+    msCounter += Runtime.LastRunTimeMs;
+}
+
+private void SetAxis(bool vertical)
+{
+    if (vertical)
+    {
+        //освободим движки
+        if (!AxisIsVertical && ccIsOn)
+        {
+            SetOverrideForward(true, 0.0f);
+            SetOverrideBack(true, 0.0f);
+        }
+        ForwardThrusters = VertAxisForwardThrusters;
+        BackThrusters = VertAxisBackThrusters;
+    }
+    else
+    {
+        //освободим движки
+        if (AxisIsVertical && ccIsOn)
+        {
+            SetOverrideForward(true, 0.0f);
+            SetOverrideBack(true, 0.0f);
+        }
+        ForwardThrusters = LongAxisForwardThrusters;
+        BackThrusters = LongAxisBackThrusters;
+    }
+    AxisIsVertical = vertical;
+    DesiredSpeed = 0.0;
+    LastSignalF = 0.0f;
+    LastSignalB = 0.0f;
+
+    CalculateShipMass();
+
+    ThrustersUpdateCounter = ThrustUpdateInterval;
+}
+
+private void SetOverrideForward(bool enable, float signal)
+{
+    ThrustForwardIsFree = enable && signal == 0.0f;
+    ThrustForwardEnabled = enable;
+    ForwardThrusters.ForEach(t =>
+        {
+            t.Enabled = enable;
+            t.ThrustOverridePercentage = signal;
+        });
+}
+private void SetOverrideBack(bool enable, float signal)
+{
+    ThrustBackIsFree = enable && signal == 0.0f;
+    ThrustBackEnabled = enable;
+    BackThrusters.ForEach(t =>
+    {
+        t.Enabled = enable;
+        t.ThrustOverridePercentage = signal;
+    });
+}
+
+private void TextOutput()
+{
+    if (ccIsOn)
+    {
+        TextSurface.WriteText(curLang[msgSpeed] + string.Format(": {0:#0.0} / {1:#0.0}", ForwardSpeed, DesiredSpeed));
+        TextSurface.WriteText("\n" + curLang[msgPower] + string.Format(": {0:#0.0%}", EnginePower), true);
+    }
+    else
+    {
+        TextSurface.WriteText(curLang[msgSpeed] + ": " + (ForwardSpeed).ToString("#0.0"));
+    }
+    TextSurface.WriteText("\n" + curLang[msgThrustEff] + ": " + ThrustEfficiency.ToString("#0.0%"), true);
+    if (AxisIsVertical)
+    {
+        TextSurface.WriteText("\n" + curLang[msgAxisIsVertical], true);
+    }
+    else
+    {
+        TextSurface.WriteText("\n" + curLang[msgAxisIsHorizontal], true);
+    }
+
+    //if (DisplayRuntimeInfo)
+    //{
+    //    TextSurface.WriteText("\n\n" + curLang[msgInstrPerCycle] + ": " + ((double)cmdCounter * dispUpdFreqInv).ToString("#0.0"), true);
+    //    TextSurface.WriteText("\n" + curLang[msgCycleTime] + ": " + (msCounter * dispUpdFreqInv).ToString("#0.0000"), true);
+    //    cmdCounter = 0;
+    //    msCounter = 0.0;
+    //}
+}
+private void GraphOutput()
+{
+
+    List<MySprite> spriteList = new List<MySprite>();
+
+    Vector2 ScreenSz = TextSurface.SurfaceSize;
+    Vector2 ScreenTextureSz = TextSurface.TextureSize;
+    float ScreenIndentTop = (ScreenTextureSz.Y - ScreenSz.Y) * 0.5f;
+    float ScreenIndentLeft = (ScreenTextureSz.X - ScreenSz.X) * 0.5f;
+
+    int speedometerSegmentsCount = 16;
+    float speedometerW = ScreenSz.X * 0.15f;
+    float speedometerH = ScreenSz.Y * 0.8f;
+    float speedometerIndentLeft = ScreenSz.X * 0.06f;
+    float speedometerIndentTop = (ScreenSz.Y - speedometerH) * 0.5f;
+
+    float speedometerDividerH = 2.5f;
+    float speedometerElemH = (speedometerH - speedometerDividerH * (float)(speedometerSegmentsCount - 1)) / (float)speedometerSegmentsCount;
+    Vector2 speedometerElementSz = new Vector2(speedometerW, speedometerElemH);
+    Vector2 speedometerElementPos = new Vector2(ScreenIndentLeft + speedometerIndentLeft + speedometerW * 0.5f, ScreenIndentTop + speedometerIndentTop + speedometerElemH * 0.5f);
+
+    double positiveSpeed = ForwardSpeed > 0.1 ? ForwardSpeed: 0.0;
+    int intSpeedIndex = (int)Math.Ceiling(positiveSpeed / MaxSpeed * (double)speedometerSegmentsCount);
+    if (intSpeedIndex > speedometerSegmentsCount) intSpeedIndex = speedometerSegmentsCount;
+
+    Color speedometerColor1 = new Color(128, 238, 128);
+    Color speedometerColor2 = new Color(0, 72, 108);
+    Color fgColor = TextSurface.ScriptForegroundColor;
+    Color c;
+
+    MySprite sprite;
+
+    for (int i = speedometerSegmentsCount-1; i >= 0; i--)
+    {
+        if (i < intSpeedIndex) c = speedometerColor1; else c = speedometerColor2;
+
+        sprite = MySprite.CreateSprite("SquareSimple", speedometerElementPos, speedometerElementSz);
+        sprite.Color = c;
+        spriteList.Add(sprite);
+
+        speedometerElementPos.Y += speedometerElemH + speedometerDividerH;
+    }
+
+    //треугольник
+    Vector2 TrianglePos;
+    if (ccIsOn)
+    { 
+        double positiveDesSpeed = DesiredSpeed > 0.1 ? DesiredSpeed: 0.0;
+        float speedH = (float)(positiveDesSpeed / MaxSpeed);
+        if (speedH > 1.0f) speedH = 1.0f;
+        float triangleRadius = ScreenSz.X * 0.02f;
+        float triangleY = ScreenIndentTop + speedometerIndentTop + speedometerH - speedometerH * speedH;
+        float triangleX = ScreenIndentLeft + speedometerIndentLeft;
+        TrianglePos = new Vector2(triangleX, triangleY);
+        float triangleDiam = 2.0f * triangleRadius;
+        Vector2 TriangleSz = new Vector2(triangleDiam, triangleDiam);
+        sprite = MySprite.CreateSprite("Triangle", TrianglePos, TriangleSz);
+        sprite.Color = Color.Red;
+        sprite.RotationOrScale = MathHelper.PiOver2;
+        spriteList.Add(sprite);
+
+        TrianglePos.X += speedometerW;
+        sprite = MySprite.CreateSprite("Triangle", TrianglePos, TriangleSz);
+        sprite.Color = Color.Red;
+        sprite.RotationOrScale = -MathHelper.PiOver2;
+        spriteList.Add(sprite);
+    }
+
+    //скорость
+    float speedTop = ScreenIndentTop + speedometerIndentTop;
+    float speedLeft = ScreenIndentLeft + ScreenSz.X * 0.85f;
+    sprite = MySprite.CreateText(ForwardSpeed.ToString("#0.0"), "Monospace", fgColor, 1.1f, TextAlignment.RIGHT);
+    sprite.Position = new Vector2(speedLeft, speedTop);
+    spriteList.Add(sprite);
+
+    //Значок движения назад
+    if (ForwardSpeed < -0.1) c = Color.Red; else c = speedometerColor2;
+    float CircleRadius = 0.039f * ScreenSz.X;     //10f;
+    float CircleDiam = CircleRadius * 2.0f;
+    float pictogramLeft = speedLeft + 1.6f * CircleRadius;
+    Vector2 CirclePos = new Vector2(pictogramLeft, speedTop + 1.4f * CircleRadius);
+    Vector2 CircleSz = new Vector2(CircleDiam, CircleDiam);
+    sprite = MySprite.CreateSprite("Circle", CirclePos, CircleSz);
+    sprite.Color = c;
+    spriteList.Add(sprite);
+
+    CircleSz = Vector2.Multiply(CircleSz, 0.8f);
+    sprite = MySprite.CreateSprite("Circle", CirclePos, CircleSz);
+    sprite.Color = TextSurface.ScriptBackgroundColor;
+    spriteList.Add(sprite);
+
+    CirclePos.Y -= CircleSz.Y * 0.53f;
+    sprite = MySprite.CreateText("R", "Monospace", c, 0.5f, TextAlignment.CENTER);
+    sprite.Position = CirclePos;
+    spriteList.Add(sprite);
+
+    //желаемая скорость и значок КК
+    speedTop += ScreenSz.Y * 0.220f;
+    if (ccIsOn)
+    {
+        sprite = MySprite.CreateText(DesiredSpeed.ToString("#0.0"), "Monospace", fgColor, 0.7f, TextAlignment.RIGHT);
+        sprite.Position = new Vector2(speedLeft, speedTop);
+        spriteList.Add(sprite);
+
+        c = speedometerColor1;
+    }
+    else
+    {
+        c = speedometerColor2;
+    }
+    //внешгий круг
+    CirclePos = new Vector2(pictogramLeft, speedTop + CircleRadius * 1.2f);
+    Vector2 BigCircleSz = new Vector2(CircleDiam, CircleDiam);
+    sprite = MySprite.CreateSprite("Circle", CirclePos, BigCircleSz);
+    sprite.Color = c;
+    spriteList.Add(sprite);
+    //пустой внутренний круг
+    CircleSz = Vector2.Multiply(BigCircleSz, 0.8f);
+    sprite = MySprite.CreateSprite("Circle", CirclePos, CircleSz);
+    sprite.Color = TextSurface.ScriptBackgroundColor;
+    spriteList.Add(sprite);
+    //обрезаем круг снизу треугольником
+    TrianglePos = CirclePos;
+    TrianglePos.Y += CircleSz.Y * 0.2f;
+    sprite = MySprite.CreateSprite("Triangle", TrianglePos, BigCircleSz);
+    sprite.Color = TextSurface.ScriptBackgroundColor;
+    spriteList.Add(sprite);
+    //стрелка
+    const float Sqr2 = 1.4142135623730950488016887242097f;
+    const float Sqr2Invert = 1f / Sqr2;
+    float ArrowLineLen = CircleSz.X * 0.6f;
+    Vector2 ArrowSz = new Vector2(0.25f * CircleSz.X, ArrowLineLen);
+    Vector2 ArrowPos = CirclePos - 0.5f * ArrowLineLen * Sqr2Invert;
+    sprite = MySprite.CreateSprite("Triangle", ArrowPos, ArrowSz);
+    sprite.RotationOrScale = -MathHelper.PiOver4;
+    sprite.Color = c;
+    spriteList.Add(sprite);
+    //центральный кружок
+    CircleSz = Vector2.Multiply(CircleSz, 0.25f);
+    sprite = MySprite.CreateSprite("Circle", CirclePos, CircleSz);
+    sprite.Color = c;
+    spriteList.Add(sprite);
+    //стрелка-указатель желаемой скорости
+    ArrowSz = CircleSz;
+    ArrowPos = CirclePos;
+    ArrowPos.X += (CircleRadius + 0.35f * ArrowSz.X) * Sqr2Invert;
+    ArrowPos.Y -= (CircleRadius + 0.35f * ArrowSz.Y) * Sqr2Invert;
+    sprite = MySprite.CreateSprite("Triangle", ArrowPos, ArrowSz);
+    sprite.RotationOrScale = -3.0f * MathHelper.PiOver4;
+    sprite.Color = c;
+    spriteList.Add(sprite);
+
+    //эффективность движков
+    float captionLeft = ScreenIndentLeft + speedometerIndentLeft * 2f + speedometerW;
+    float captionTop = ScreenIndentTop + ScreenSz.Y * 0.47f;
+    float captionWidth = ScreenSz.X * 0.8f - captionLeft;
+    float captionHeight = ScreenSz.Y * 0.09f;   //16f;
+    float valueLeft = ScreenIndentLeft + ScreenSz.X * 0.97f;
+
+    sprite = MySprite.CreateText(curLang[msgThrustEff] + ":", "DEBUG", fgColor, 0.65f, TextAlignment.LEFT);
+    sprite.Position = new Vector2(captionLeft, captionTop);
+    spriteList.Add(sprite);
+
+    sprite = MySprite.CreateText(ThrustEfficiency.ToString("#0.0%"), "Monospace", fgColor, 0.5f, TextAlignment.RIGHT);
+    sprite.Position = new Vector2(valueLeft, captionTop);
+    spriteList.Add(sprite);
+
+    //мощность движков
+    if (ccIsOn)
+    {
+        captionTop = ScreenIndentTop + ScreenSz.Y * 0.585f;
+
+        sprite = MySprite.CreateText(curLang[msgPower] + ":", "DEBUG", fgColor, 0.65f, TextAlignment.LEFT);
+        sprite.Position = new Vector2(captionLeft, captionTop);
+        spriteList.Add(sprite);
+
+        sprite = MySprite.CreateText(EnginePower.ToString("#0.0%"), "Monospace", fgColor, 0.5f, TextAlignment.RIGHT);
+        sprite.Position = new Vector2(valueLeft, captionTop);
+        spriteList.Add(sprite);
+    }
+
+    //выбранная ось
+    //Color bgColor = ccIsOn ? fgColor : speedometerColor2;
+    Color bgColor = speedometerColor2;
+    float pictogramWidth = ScreenSz.X * 0.085f;
+    float pictogramWidthHalf = pictogramWidth * 0.5f;
+    pictogramLeft = captionLeft + pictogramWidthHalf;
+    float pictogramTop = ScreenIndentTop + ScreenSz.Y - speedometerIndentTop - pictogramWidthHalf;
+    float lineW = pictogramWidth * 0.075f;
+    float arrowSzFloat = pictogramWidth * 0.23f;
+    Vector2 arrowSz = new Vector2(arrowSzFloat);
+    //верт.стрелка
+    sprite = MySprite.CreateSprite("SquareSimple", new Vector2(pictogramLeft - pictogramWidthHalf + lineW, pictogramTop), new Vector2(lineW, pictogramWidth - lineW * 2f));
+    sprite.Color = bgColor;
+    spriteList.Add(sprite);
+    sprite = MySprite.CreateSprite("Triangle", new Vector2(pictogramLeft - pictogramWidthHalf + lineW, pictogramTop - pictogramWidthHalf), arrowSz);
+    sprite.Color = bgColor;
+    spriteList.Add(sprite);
+    //гор.стрелка
+    sprite = MySprite.CreateSprite("SquareSimple", new Vector2(pictogramLeft, pictogramTop + pictogramWidthHalf - lineW), new Vector2(pictogramWidth - lineW * 2f, lineW));
+    sprite.Color = bgColor;
+    spriteList.Add(sprite);
+    sprite = MySprite.CreateSprite("Triangle", new Vector2(pictogramLeft + pictogramWidthHalf, pictogramTop + pictogramWidthHalf - lineW), arrowSz);
+    sprite.RotationOrScale = MathHelper.PiOver2;
+    sprite.Color = bgColor;
+    spriteList.Add(sprite);
+    //стрелка указателя оси
+    bgColor = ccIsOn ? speedometerColor1 : speedometerColor2;
+    arrowSzFloat = pictogramWidth * 0.45f;
+    arrowSz = new Vector2(arrowSzFloat);
+    lineW = pictogramWidth * 0.17f;
+    if (AxisIsVertical)
+    {
+        sprite = MySprite.CreateSprite("SquareSimple", new Vector2(pictogramLeft, pictogramTop + lineW), new Vector2(lineW, lineW * 2f));
+        sprite.Color = bgColor;
+        spriteList.Add(sprite);
+        sprite = MySprite.CreateSprite("Triangle", new Vector2(pictogramLeft, pictogramTop - arrowSzFloat*0.5f), arrowSz);
+        sprite.Color = bgColor;
+        spriteList.Add(sprite);
+    }
+    else
+    {
+        sprite = MySprite.CreateSprite("SquareSimple", new Vector2(pictogramLeft - lineW, pictogramTop), new Vector2(2f * lineW, lineW));
+        sprite.Color = bgColor;
+        spriteList.Add(sprite);
+        sprite = MySprite.CreateSprite("Triangle", new Vector2(pictogramLeft + arrowSzFloat * 0.5f, pictogramTop), arrowSz);
+        sprite.RotationOrScale = MathHelper.PiOver2;
+        sprite.Color = bgColor;
+        spriteList.Add(sprite);
+    }
+
+
+    using (MySpriteDrawFrame frame = TextSurface.DrawFrame())
+    {
+        frame.AddRange(spriteList);
+    }
+}
+
+private void CalculateShipMass()
+{
+    ShipMass = ShipController.CalculateShipMass().PhysicalMass;
+
+    MaxForwardThrust = 0.0;
+    MaxBackThrust = 0.0;
+    double MaxThrust = 0.0;
+    foreach (IMyThrust thr in ForwardThrusters)
+    {
+        if (thr.IsFunctional)
+        {
+            MaxForwardThrust += thr.MaxEffectiveThrust;
+            MaxThrust += thr.MaxThrust;
+        }
+    }
+    foreach (IMyThrust thr in BackThrusters)
+    {
+        if (thr.IsFunctional) MaxBackThrust += thr.MaxEffectiveThrust;
+    }
+
+    if (MaxForwardThrust == 0.0) MaxForwardThrustInv = 1.0e12; else MaxForwardThrustInv = 1.0 / MaxForwardThrust;
+    if (MaxBackThrust == 0.0) MaxBackThrustInv = 1.0e12; else MaxBackThrustInv = 1.0 / MaxBackThrust;
+
+    if (MaxThrust > 0.0) ThrustEfficiency = MaxForwardThrust / MaxThrust; else ThrustEfficiency = 0.0;
+    
+    MassUpdateCounter = 0;
+}
+
+private bool ReadConfig(out bool firstLaunch)
+{
+
+    bool resault = false;
+    firstLaunch = false;
+
+    const string iniSection = "General";
+
+    string cfgText = Me.CustomData;
+    MyIni ini = new MyIni();
+    if (string.IsNullOrWhiteSpace(cfgText))
+    {
+        firstLaunch = true;
+    }
+    else
+    {
+        if (ini.TryParse(cfgText))
+        {
+            lang = ini.Get(iniSection, "Language").ToString(lang).ToLower();
+            CockpitName = ini.Get(iniSection, "Cockpit").ToString(CockpitName);
+            DisplayName = ini.Get(iniSection, "Display").ToString(DisplayName);
+            GraphicalOutput = ini.Get(iniSection, "GraphicalOutput").ToBoolean(GraphicalOutput);
+            DisplayUpdateInterval = ini.Get(iniSection, "DisplayUpdateInterval").ToInt32(DisplayUpdateInterval);
+            ThrustUpdateInterval = ini.Get(iniSection, "ThrustUpdateInterval").ToInt32(ThrustUpdateInterval);
+            LongitudinalAxisIsAllowed = ini.Get(iniSection, "LongitudinalAxisIsAllowed").ToBoolean(LongitudinalAxisIsAllowed);
+            VerticalAxisIsAllowed = ini.Get(iniSection, "VerticalAxisIsAllowed").ToBoolean(VerticalAxisIsAllowed);
+            TriplePressingIsAllowed = ini.Get(iniSection, "TriplePressingIsAllowed").ToBoolean(TriplePressingIsAllowed);
+
+            resault = true;
+        }
+    }
+
+    switch (lang)
+    { 
+        case "ru":
+            curLang = langMsgRu;
+            break;
+        case "en":
+            curLang = langMsgEn;
+            break;
+        case "de":
+            curLang = langMsgDe;
+            break;
+        default:
+            lang = "ru";
+            curLang = langMsgRu;
+            break;
+    }
+
+    ini.Clear();
+    ini.Set(iniSection, "Language", lang);
+    ini.Set(iniSection, "Cockpit", CockpitName);
+    ini.Set(iniSection, "Display", DisplayName);
+    ini.Set(iniSection, "GraphicalOutput", GraphicalOutput);
+    ini.Set(iniSection, "DisplayUpdateInterval", DisplayUpdateInterval);
+    ini.Set(iniSection, "ThrustUpdateInterval", ThrustUpdateInterval);
+    ini.Set(iniSection, "LongitudinalAxisIsAllowed", LongitudinalAxisIsAllowed);
+    ini.Set(iniSection, "VerticalAxisIsAllowed", VerticalAxisIsAllowed);
+    ini.Set(iniSection, "TriplePressingIsAllowed", TriplePressingIsAllowed);
+
+    ini.SetComment(iniSection, "Language", "Одно из (one of): ru, en, de");
+    ini.SetComment(iniSection, "Cockpit", curLang[msgCommentCockpit]);
+    ini.SetComment(iniSection, "Display", curLang[msgCommentDisplay]);
+    ini.SetComment(iniSection, "GraphicalOutput", curLang[msgCommentGraphicalOutput]);
+    ini.SetComment(iniSection, "DisplayUpdateInterval", curLang[msgCommentDisplayUpd]);
+    ini.SetComment(iniSection, "ThrustUpdateInterval", curLang[msgCommentThrustUpd]);
+    ini.SetComment(iniSection, "LongitudinalAxisIsAllowed", curLang[msgCommentLongAxis]);
+    //ini.SetComment(iniSection, "VerticalAxisIsAllowed", curLang[msgCommentVertAxis]);
+    ini.SetComment(iniSection, "TriplePressingIsAllowed", curLang[msgCommentTriplePressing]);
+
+    Me.CustomData = ini.ToString();
+
+    return resault;
+
+}
+private void SaveState()
+{
+    StringBuilder sb = new StringBuilder();
+    //0
+    sb.AppendLine("3");
+    //1
+    sb.AppendLine(ccIsOn.ToString());
+    //2
+    sb.AppendLine(DesiredSpeed.ToString());
+    //3
+    sb.AppendLine(true.ToString());     //признак, что ScriptForegraundColor не нужно сбрасывать
+    //4
+    sb.AppendLine(AxisIsVertical.ToString());
+
+    Storage = sb.ToString();
+}
+private void LoadState()
+{
+
+    string[] strs = Storage.Split('\n');
+
+    if (strs.Length < 3) return;
+
+    int saveFormatVersion = Int32.Parse(strs[0]);
+    ccIsOn = bool.Parse(strs[1]);
+    DesiredSpeed = double.Parse(strs[2]);
+    if (saveFormatVersion == 1) return;
+    
+    //foregraundColorIsSet = bool.Parse(strs[3]);
+    foregraundColorIsSet = true;
+    if (saveFormatVersion == 2) return;
+
+    AxisIsVertical = bool.Parse(strs[4]);
+
+}
+
+private class TriplePressingDetector
+{
+    //1: вперед или вверх, -1: назад или вниз
+    public int Cmd = 0;
+    private int Stage = 0;
+    private DateTime Time = DateTime.Now;
+    public bool IsTriggered = false;
+
+    public void Clear()
+    {
+        Cmd = 0;
+        Stage = 0;
+        Time = DateTime.Now;
+    }
+
+    public void Cycle(double Signal)
+    {
+        IsTriggered = false;
+        int DeltaT = (int)(DateTime.Now - Time).TotalMilliseconds;
+        if (Signal > 0.0f)
+        {
+            if (Stage == 0)
+            {
+                Stage = 1;
+                Time = DateTime.Now;
+                Cmd = 1;
+            }
+            else if (Cmd == 1 && DeltaT < 1000)
+            {
+                if (Stage == 2) Stage = 3;
+                else if (Stage == 4) Stage = 5;
+            }
+            else if (DeltaT >= 1000)
+            {
+                Cmd = 0;
+                Stage = 0;
+            }
+        }
+        else if (Signal < 0.0f)
+        {
+            if (Stage == 0)
+            {
+                Stage = 1;
+                Time = DateTime.Now;
+                Cmd = -1;
+            }
+            else if (Cmd == -1 && DeltaT < 1000)
+            {
+                if (Stage == 2) Stage = 3;
+                else if (Stage == 4) Stage = 5;
+            }
+            else if (DeltaT >= 1000)
+            {
+                Cmd = 0;
+                Stage = 0;
+            }
+        }
+        else   //Signal == 0.0f
+        {
+            if (DeltaT < 1000)
+            {
+                if (Stage == 1) Stage = 2;
+                else if (Stage == 3) Stage = 4;
+                else if (Stage == 5)
+                {
+                    Stage = 6;
+                    IsTriggered = true;
+                }
+            }
+            else
+            {
+                Cmd = 0;
+                Stage = 0;
+            }
+        }
+    }
+
+
+}
+
+#region helpers
+//поиск блоков на том же гриде, что и anyBlock
+//дисплей может быть текстовой панелью ("Дисплей 1х1") или дисплеем в кабине или в другом блоке: "Кокпит(3)" или "Медблок(0)"
+private static IMyTextSurface FindDisplay(string DisplayName, IMyGridTerminalSystem gts, IMyTerminalBlock anyBlock)
+{
+    IMyTextSurface TextSurface = null;
+
+    int x = DisplayName.IndexOf('(');
+    if (x == -1)
+    {
+        TextSurface = FindBlockOfType<IMyTextSurface>(DisplayName, gts, anyBlock);
+    }
+    else
+    {
+        string mName = DisplayName.Substring(0, x);
+        IMyTextSurfaceProvider sp = FindBlockOfType<IMyTextSurfaceProvider>(mName, gts, anyBlock);
+        if (sp != null)
+        {
+            int y = DisplayName.IndexOf(')');
+            string indexStr = DisplayName.Substring(x + 1, y - x - 1).Trim();
+            int surfIndex = int.Parse(indexStr);
+            TextSurface = sp.GetSurface(surfIndex);
+        }
+    }
+
+    return TextSurface;
+}
+private static T FindBlockOfType<T>(string CustomName, IMyGridTerminalSystem gts, IMyTerminalBlock anyBlock) where T : class
+{
+    List<IMyTerminalBlock> allBlocks = new List<IMyTerminalBlock>();
+    gts.GetBlocksOfType<IMyTerminalBlock>(allBlocks, block => block.IsSameConstructAs(anyBlock) && block is T && block.CustomName == CustomName);
+
+    if (allBlocks.Count == 0) return null;
+
+    return allBlocks[0] as T;
+}
+private static IMyShipController FindDefaultCockpit(IMyGridTerminalSystem gts, IMyTerminalBlock anyBlock)
+{
+    List<IMyShipController> allBlocks = new List<IMyShipController>();
+    gts.GetBlocksOfType<IMyShipController>(allBlocks, block => block.IsSameConstructAs(anyBlock) && block.CanControlShip);
+
+    if (allBlocks.Count == 0) return null;
+
+    IMyShipController findedCtrl = allBlocks[0];
+    foreach (IMyShipController ctrl in allBlocks)
+    {
+        if (ctrl.IsUnderControl) return ctrl;
+        if (ctrl.IsMainCockpit) findedCtrl = ctrl;
+    }
+    return findedCtrl;
+}
+#endregion
+
+#region Language set
+private string lang = "ru";
+
+private const int msgDefCockpitName = 0;
+private const int msgDefDisplayName = 1;
+private const int msgNewCfg = 2;
+private const int msgBrokenCfg = 3;
+private const int msgDisplayNotFound = 4;
+private const int msgCockpitNotfound = 5;
+private const int msgInitComplete = 6;
+private const int msgInitError = 7;
+private const int msgSpeed = 8;
+private const int msgThrustEff = 9;
+private const int msgInstrPerCycle = 10;
+private const int msgCycleTime = 11;
+private const int msgCommentCockpit = 12;
+private const int msgCommentDisplay = 13;
+private const int msgPower = 14;
+private const int msgCommentDisplayUpd = 15;
+private const int msgCommentThrustUpd = 16;
+private const int msgCommentTriplePressing = 17;
+private const int msgCommentGraphicalOutput = 18;
+private const int msgDefaultCockpitWasSet = 19;
+private const int msgDefaultDisplayWasSet = 20;
+private const int msgSettingsNotSet = 21;
+private const int msgCommentLongAxis = 22;
+private const int msgAxisIsHorizontal = 23;
+private const int msgAxisIsVertical = 24;
+
+private string[] langMsgRu =
+{
+    "Кокпит",
+    "Кокпит(0)",
+    "Была сформирована новая конфигурация.",
+    "Ошибка чтения конфигурации из пользовательских данных. Конфигурация была сформирована заново. Отредактируйте \"Свои данные (Custom Data)\" и перекомпилируйте скрипт.",
+    "Дисплей не определен!",
+    "Кокпит не определен!",
+    "Инициализация завершена.",
+    "Ошибка инициализации скрипта!",
+    "Скорость",
+    "Эффект. двиг",
+    "Инструкций/цикл",      //10
+    "Время цикла, мс",
+    "Назване кокпита, кресла пилота, дистанционного управления...",
+    "Назване текстовой панели. Это может быть дисплей или любой другой блок,\nимеющий дисплей, например: \"Дисплей 1х1\" или \"Кокпит(0)\",\nгде индекс указывает номер дисплея в блоке, нумерация начинается с 0.",
+    "Мощность",
+    "Интервал обновления информации на дисплее в игровых тактах.\nВ одной секунде 60 тактов. От 1 до ...",
+    "Интервал перерасчета математики и управления движками.\nВполне комфортно летать при обновлении раз в 10 тактов.",
+    "Разрешено включение/отключение режима быстрым тройным\nнажатием W, S, Spacebar, C.",
+    "Графический вывод на дисплей. Красивее, но медленнее.",
+    "Будет использован кокпит: {0}",
+    "Будет использован дисплей: {0}",       //20
+    "Настройте \"Свои данные\" и перекомпилируйте скрипт!",
+    "Разрешение использования в продольной и вертикальной осях.",
+    "Ось: горизонтальная",
+    "Ось: вертикальная"
+};
+
+private string[] langMsgEn =
+{
+    "Cockpit",
+    "Cockpit(0)",
+    "A new configuration has been formed.",
+    "Error reading configuration from custom data. The configuration has been generated anew. Edit the \"Custom Data\" and recompile the script.",
+    "Display not defined!",
+    "Cockpit is not defined!",
+    "Initialization complete.",
+    "Script initialization failed!",
+    "Speed",
+    "Engine eff",
+    "Instructions/cycle",      //10
+    "Cycle time, ms",
+    "Name of cockpit, pilot's seat, remote control ...",
+    "Name the text panel. This can be a display or any other block,\nhaving a LCD, for example: \"Display 1x1\" or \"Cockpit(0)\",\nwhere the index indicates the number of the LCD in the block,\nthe numbering starts from 0.",
+    "Power",
+    "The interval of updating information on the display in game clocks.\nIn one second 60 clocks. From 1 to ...",
+    "The interval of recalculation of mathematics and control engines.\nIt is quite comfortable to fly when updated every 10 cycles.",
+    "Enabled on/off by quick triple pressing W, S, Spacebar, C.",
+    "Graphical display. More beautiful, but slower.",
+    "Cockpit will be used: {0}",
+    "Display will be used: {0}",       //20
+    "Configure \"Custom Data\" and recompile the script!",
+    "Permission to use in the longitudinal and vertical axes.",
+    "Axis: horizontal",
+    "Axis: vertical"
+};
+private string[] langMsgDe =
+{
+    "Cockpit",
+    "Cockpit(0)",
+    "Eine neue Konfiguration wurde erstellt.",
+    "Fehler beim Lesen der Konfiguration aus den Benutzerdaten. Die Konfiguration wurde neu erstellt. Bearbeiten Sie \"Benutzerdefinierte Daten\" und kompilieren Sie das Skript neu.",
+    "Bildschirm nicht definiert!",
+    "Cockpit nicht definiert!",
+    "Initialisierung abgeschlossen.",
+    "Skriptinitialisierung fehlgeschlagen!",
+    "Geschwindigkeit",
+    "Effizienz",       //"Motoreffizienz",
+    "Anweisungen/Zyklus",       //10
+    "Zykluszeit, ms",
+    "Name Cockpit, Pilotensitz, Fernbedienung ...",
+    "Name der Anzeige. Dies kann ein Bildschirm oder ein beliebiger anderer\nBlock mit Anzeige sein, zum Beispiel: \"Anzeige 1x1\" oder \"Cockpit(0)\",\nwobei die Zahl in der Klammer die Bildschirm-Nummer angibt.\nDie Nummerierung beginnt bei 0.",
+    "Leistung",
+    "Das Intervall für die Aktualisierung der Informationen auf dem Display\nin Takten. Eine Sekunde besteht aus 60 Takten. Von 1 bis ...",
+    "Das Intervall dient zur Neuberechnung der Mathematischen- und\nSteuereinheiten. Die beste Leistung kann bei einer 10 taktiken\nAktualisierung erzielt werden.",
+    "Dreifachbetätigung der Tasten W, S, C und der Leertaste zur Aktivierung\ndes Tempomaten aktivieren/deaktivieren.",
+    "Grafisches Display aktivieren/deaktivieren. Grafisches Display ist\nschöner benötigt jedoch mehr Leistung.",
+    "Dieses Cockpit wird verwende: {0}",
+    "Diese Anzeige wird verwendet: {0}",        //20
+    "Konfigurieren Sie \"Custom Data\" und rekompilieren Sie das Script!",
+    "Nutzungserlaubnis in der Längs- und Vertikalachse.",
+    "Achse: horizontal",
+    "Achse: vertikal"
+};
+#endregion
