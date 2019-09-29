@@ -1,0 +1,333 @@
+#if DEBUG
+using System;
+using System.Linq;
+using System.Text;
+using System.Collections;
+using System.Collections.Generic;
+
+using VRageMath;
+using VRage.Game;
+using VRage.Collections;
+using Sandbox.ModAPI.Ingame;
+using VRage.Game.Components;
+using VRage.Game.ModAPI.Ingame;
+using Sandbox.ModAPI.Interfaces;
+using Sandbox.Game.EntityComponents;
+using SpaceEngineers.Game.ModAPI.Ingame;
+using VRage.Game.ObjectBuilders.Definitions;
+
+namespace DCM
+{
+
+    public sealed class Program : MyGridProgram
+    {
+#endif
+        //=======================================================================
+        //////////////////////////BEGIN//////////////////////////////////////////
+        //=======================================================================
+
+        public string LCD_Name = "DCM Text Panel";
+        public string Pistons_group_name = "DCM Pistons";
+        public string Top_Merge_group_name = "DCM Top Merge Blocks";
+        public string Bot_Merge_group_name = "DCM Bottom Merge Blocks";
+        public string Top_Connector_name = "DCM Top Connector";
+        public string Bot_Connector_name = "DCM Bottom Connector";
+        public string Projector_name = "DCM Projector";
+        public string my_Cockpit_name = "DCM Control Seat";
+
+        
+        public Program()
+        {
+            // The constructor, called only once every session and
+            // always before any other method is called. Use it to
+            // initialize your script.
+            Runtime.UpdateFrequency = UpdateFrequency.Update10;
+            if (Storage.Length > 0)
+            {
+                Me.CustomData = Storage;
+            }
+            else
+            {
+                Me.CustomData = "LCD Name = " + LCD_Name + "\n" +
+                                "Pistons Group Name = " + Pistons_group_name + "\n" +
+                                "Top Merge Group Name = " + Top_Merge_group_name + "\n" +
+                                "Bottom Merge Group Name = " + Bot_Merge_group_name + "\n" +
+                                "Top Connector  Name = " + Top_Connector_name + "\n" +
+                                "Bottom Connector Name = " + Bot_Connector_name + "\n" +
+                                "Control Seat name = " + my_Cockpit_name + "\n";
+            }
+        }
+
+        public float[] piston_velocity = new float[] { -1, 0, 1 };
+        public string state;
+        List<IMyTextSurface> my_LCD;
+        List<IMyPistonBase> my_pistons_group;
+        List<IMyShipMergeBlock> my_top_merge_group;
+        List<IMyShipMergeBlock> my_bot_merge_group;
+        IMyShipConnector my_top_connector = null;
+        IMyShipConnector my_bot_connector = null;
+        IMyCockpit my_Cockpit = null;
+        IMyProjector my_projector = null;
+
+
+        // use control module... this can always be true
+        public bool controlModule = true;
+        public Dictionary<string, object> CMinputs = null;
+        public const string retract_jack = "pageup";
+        public const string extend_jack = "pagedown";
+
+        string Init()
+        {
+
+            string ERR_TXT = "";
+
+            //list of all connected grids
+            my_LCD = new List<IMyTextSurface>();
+            List<IMyTerminalBlock> TerminalBlock_list = new List<IMyTerminalBlock>();
+            GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(TerminalBlock_list);
+            if (TerminalBlock_list.Count == 0)
+            {
+                ERR_TXT += "no blocks found\n";
+            }
+            else
+            {
+                for (int i = 0; i < TerminalBlock_list.Count; i++)
+                {
+                    if (TerminalBlock_list[i].CustomName.Contains(LCD_Name))
+                    {
+                        try
+                        {
+                            my_LCD.Add(((IMyTextSurfaceProvider)TerminalBlock_list[i]).GetSurface(0));
+                        }catch (Exception e) { }//stfu, failure is nothing to brag about  
+                    }
+
+                    if (TerminalBlock_list[i].CustomName.Contains(my_Cockpit_name))
+                        my_Cockpit = (IMyCockpit)TerminalBlock_list[i];
+
+                    if (TerminalBlock_list[i].CustomName.Contains(Top_Connector_name))
+                        my_top_connector = (IMyShipConnector)TerminalBlock_list[i];
+
+                    if (TerminalBlock_list[i].CustomName.Contains(Bot_Connector_name))
+                        my_bot_connector = (IMyShipConnector)TerminalBlock_list[i];
+
+                    if (TerminalBlock_list[i].CustomName.Contains(Projector_name))
+                        my_projector = (IMyProjector)TerminalBlock_list[i];
+
+                }
+
+                if (my_Cockpit == null)
+                    ERR_TXT += "no Cockpit named " + my_Cockpit_name + "\n";
+            }
+
+            my_pistons_group = new List<IMyPistonBase>();
+            if (GridTerminalSystem.GetBlockGroupWithName(Pistons_group_name) != null)
+            {
+                GridTerminalSystem.GetBlockGroupWithName(Pistons_group_name).GetBlocksOfType<IMyPistonBase>(my_pistons_group);
+                if (my_pistons_group.Count == 0)
+                    ERR_TXT += "group " + Pistons_group_name + " has no Piston blocks\n";
+            }
+            else
+                ERR_TXT += "group " + Pistons_group_name + " not found\n";
+
+            my_top_merge_group = new List<IMyShipMergeBlock>();
+            if (GridTerminalSystem.GetBlockGroupWithName(Top_Merge_group_name) != null)
+            {
+                GridTerminalSystem.GetBlockGroupWithName(Top_Merge_group_name).GetBlocksOfType<IMyShipMergeBlock>(my_top_merge_group, filterThis);
+                if (my_top_merge_group.Count == 0)
+                    ERR_TXT += "group " + Top_Merge_group_name + " has no Merge blocks\n";
+            }
+            else
+                ERR_TXT += "group " + Top_Merge_group_name + " not found\n";
+
+            my_bot_merge_group = new List<IMyShipMergeBlock>();
+            if (GridTerminalSystem.GetBlockGroupWithName(Bot_Merge_group_name) != null)
+            {
+                GridTerminalSystem.GetBlockGroupWithName(Bot_Merge_group_name).GetBlocksOfType<IMyShipMergeBlock>(my_bot_merge_group);
+                if (my_bot_merge_group.Count == 0)
+                    ERR_TXT += "group " + Bot_Merge_group_name + " has no Merge blocks\n";
+            }
+            else
+                ERR_TXT += "group " + Bot_Merge_group_name + " not found\n";
+
+            return ERR_TXT;
+        }
+
+
+        public void Main(string args)
+        {
+
+            if (args.ToLower().Contains("reset"))
+            {
+                Storage = "";
+                write_lcd("Please recompile");
+                Runtime.UpdateFrequency = UpdateFrequency.None;
+                return;
+            }
+
+            var cd_lines = Me.CustomData.Split('\n').Select(p => System.Text.RegularExpressions.Regex.Split(p, "=")).ToArray();
+            foreach (string[] line in cd_lines)
+            {
+                if (line[0].Contains("LCD"))
+                    LCD_Name = line[1].Trim();
+                else if (line[0].Contains("Pistons"))
+                    Pistons_group_name = line[1].Trim();
+                else if (line[0].Contains("Seat"))
+                    my_Cockpit_name = line[1].Trim();
+            }
+
+
+            // display errors
+            string ERR_TXT = Init();
+            float total_percents = 0;
+            write_lcd("Clear");
+            /*if (ERR_TXT != "")
+                write_lcd("Script Errors:\n" + ERR_TXT + "(make sure block ownership is set correctly)");*/
+
+            //Read Status of the system
+            write_lcd("Top Grid Status: " + (Me.CubeGrid.IsStatic ? "Static" : "Dynamic"));
+            write_lcd("Bottom Grid Status: " + (my_bot_connector.CubeGrid.IsStatic ? "Static" : "Dynamic"));
+
+            foreach (IMyPistonBase piston in my_pistons_group)
+            {
+                float MaxLimit = piston.MaxLimit;
+                float MinLimit = piston.MinLimit;
+                float Current = getExtraFieldFloat(piston, "Current position: (\\d+\\.?\\d*)");
+                float percents = (Current - MinLimit) * 100 / (MaxLimit - MinLimit);
+                total_percents += percents;
+            }
+            write_lcd("Piston Distance = " + total_percents.ToString("0") + "% / " + (100 * my_pistons_group.Count).ToString() + "%");
+
+            foreach (IMyShipMergeBlock merge_block in my_top_merge_group)
+                write_lcd(merge_block.CustomName + (merge_block.IsConnected ? ": Connected" : ": Not Connected"));
+
+            foreach (IMyShipMergeBlock merge_block in my_bot_merge_group)
+                write_lcd(merge_block.CustomName + (merge_block.IsConnected ? ": Connected" : ": Not Connected"));
+
+            if (my_top_connector != null)
+                write_lcd(my_top_connector.CustomName + ": " + (my_top_connector.Status.ToString()));
+            if (my_bot_connector != null)
+                write_lcd(my_bot_connector.CustomName + ": " + (my_bot_connector.Status.ToString()));
+
+            if (my_projector != null)
+                write_lcd(my_projector.CustomName + ": " + (my_projector.RemainingBlocks.ToString()));
+
+
+            // Define state according to system status
+            if ((total_percents <= 285) && (total_percents >= 45))
+            {
+                state = "In motion";
+                if (my_pistons_group[0].Velocity < 0)
+                    state += " closing";
+                else
+                    state += " opening";
+            }
+            else if (total_percents > 285)
+                state = "Open";
+            else if (total_percents < 45)
+                state = "Closed";
+
+            if (state == "Open" || state == "Closed")
+            {
+                if ((my_bot_merge_group[0].IsConnected || my_bot_merge_group[1].IsConnected) && (my_top_merge_group[0].IsConnected || my_top_merge_group[1].IsConnected))
+                    state += ", Top And Bottom Locked";
+                else if (my_bot_merge_group[0].IsConnected || my_bot_merge_group[1].IsConnected)
+                    state += ", Bottom Locked";
+                else if (my_top_merge_group[0].IsConnected || my_top_merge_group[1].IsConnected)
+                    state += ", Top Locked";
+            }
+            write_lcd("State: " + state);
+
+
+            /*
+            IMyCockpit my_Cockpit = null;
+            IMyProjector my_projector = null;
+            */
+            if (args.ToLower().Contains("dynamic"))
+            {
+
+            }
+
+        }
+
+        bool filterThis(IMyTerminalBlock block)
+        {
+            return block.CubeGrid == Me.CubeGrid;
+        }
+
+        const string MULTIPLIERS = ".kMGTPEZY";
+
+        float getExtraFieldFloat(IMyTerminalBlock block, string regexString)
+        {
+            System.Text.RegularExpressions.Regex regex = new System.Text.RegularExpressions.Regex(regexString, System.Text.RegularExpressions.RegexOptions.Singleline);
+            float result = 0.0f;
+            double parsedDouble;
+            System.Text.RegularExpressions.Match match = regex.Match(block.DetailedInfo);
+            if (match.Success)
+            {
+                if (Double.TryParse(match.Groups[1].Value, out parsedDouble))
+                {
+                    result = (float)parsedDouble;
+                }
+                if (MULTIPLIERS.IndexOf(match.Groups[2].Value) > -1)
+                {
+                    result = result * (float)Math.Pow(1000.0, MULTIPLIERS.IndexOf(match.Groups[2].Value));
+                }
+            }
+            return result;
+        }
+        public void write_lcd(string str)
+        {
+            if (str == "Clear")
+            {
+                if (my_LCD != null)
+                    foreach (IMyTextSurface lcd in my_LCD)
+                    {
+                        try { lcd.WriteText(" ", false); }
+                        catch (Exception e) { }//stfu, failure is nothing to brag about 
+                    }
+                Echo("");
+            }
+            else
+            {
+                if (my_LCD != null)
+                {
+                    foreach (IMyTextSurface lcd in my_LCD)
+                    {
+                        try {
+                            lcd.WriteText(str + "\n", true);
+                            lcd.ContentType = VRage.Game.GUI.TextPanel.ContentType.TEXT_AND_IMAGE;
+                        }
+                        catch (Exception e) { }//stfu, failure is nothing to brag about 
+                    }
+                }
+                Echo(str);
+            }
+        }
+        float getDegrees(float rad)
+        {
+            return (float)(rad * (180 / Math.PI));
+        }
+        public void Save()
+        {
+            // Called when the program needs to save its state. Use
+            // this method to save your state to the Storage field
+            // or some other means.
+
+            // This method is optional and can be removed if not
+            // needed.
+
+            Storage = Me.CustomData;
+        }
+
+        //=======================================================================
+        //////////////////////////END////////////////////////////////////////////
+        //=======================================================================
+#if DEBUG
+    }
+}
+#endif
+
+//bv2 bind Open Control ExtraButton2
+//bv2 bind Close Shift ExtraButton2
+//bv2 bind Select ExtraButton2
+//
