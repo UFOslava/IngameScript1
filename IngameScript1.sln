@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.28307.852
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IngameScript1", "IngameScript1\IngameScript1.csproj", "{550BF3ED-F563-4FB8-B906-E62BFD4599DD}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SE_DCM_Elev", "IngameScript1\SE_DCM_Elev.csproj", "{550BF3ED-F563-4FB8-B906-E62BFD4599DD}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

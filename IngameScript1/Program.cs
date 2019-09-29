@@ -20,7 +20,7 @@ using VRageMath;
 
 namespace IngameScript
 {
-    partial class Program : MyGridProgram
+    class Program : MyGridProgram
     {
         // This file contains your actual script.
         //
@@ -49,14 +49,20 @@ namespace IngameScript
         public IMyShipConnector BottomConnector = null;
         public IMyShipConnector TopConnector = null;
         public IMyProgrammableBlock CruiseControlProgrammableBlock = null;
+        public IMySensorBlock TopSensorBlock = null;
+        public IMySensorBlock BottomSensorBlock = null;
         public static List<IMyTerminalBlock> TerminalBlockList = new List<IMyTerminalBlock>();//declare an empty list of TerminalBlocks for later use in searches.
         public static List<IMyTerminalBlock> TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>();// T:
         public Dictionary<string, string> SettingsDictionary = new Dictionary<string, string>() {
             {"Output LCD Name","T:Status LCD"},
             {"Top Floor Connector","T:Top Connector"},
             {"Bottom Floor Connector","T:Bottom Connector"},
-            {"Cruise Control PB","T:Cruise Control"}
+            {"Cruise Control PB","T:Cruise Control"},
+            {"Top Sensor","T:Top Sensor"},
+            {"Bottom Sensor","T:Bottom Sensor"}
         };
+        public Log Log = new Log("UFOslava's DCM Lift Control");
+
 
 
         public List<IMyTerminalBlock> GetBlocksByPattern(string Pattern) {
@@ -102,7 +108,7 @@ namespace IngameScript
                     Block.CustomData += "\n" + line + " = " + Settings[line];
                 }
             }
-
+            
             return CustomData;
         }
 
@@ -126,21 +132,43 @@ namespace IngameScript
             TopConnector = (IMyShipConnector)GetBlocksByPattern(SettingsDictionary["Top Floor Connector"])[0];
             BottomConnector = (IMyShipConnector)GetBlocksByPattern(SettingsDictionary["Bottom Floor Connector"])[0];
             CruiseControlProgrammableBlock = (IMyProgrammableBlock) GetBlocksByPattern(SettingsDictionary["Cruise Control PB"])[0];
+            TopSensorBlock = (IMySensorBlock) GetBlocksByPattern(SettingsDictionary["Top Sensor"]);
+            BottomSensorBlock = (IMySensorBlock) GetBlocksByPattern(SettingsDictionary["Bottom Sensor"]);
             //Output screens
-            outputLcdList = GetTextSurfaces();
+            outputLcdList = GetTextSurfaces("Output LCD Name");
         }
 
-        public List<IMyTextSurface> GetTextSurfaces() {
-            List<IMyTerminalBlock> OutputBlocks = GetBlocksByPattern(SettingsDictionary["Output LCD Name"]);
+        public List<IMyTextSurface> GetTextSurfaces(string Pattern) {
+            List<IMyTerminalBlock> OutputBlocks = GetBlocksByPattern(SettingsDictionary[Pattern]);
             List<IMyTextSurface> OutputList = new List<IMyTextSurface>();
             foreach (IMyTerminalBlock Block in OutputBlocks) {
-                try{
-                    OutputList.Add(((IMyTextSurfaceProvider)Block).GetSurface(0));
-                }
-                catch (Exception e) {}//stfu, failure is nothing to brag about
+                try {
+                    OutputList.Add(((IMyTextSurfaceProvider) Block).GetSurface(0));
+                } catch (Exception e) {
+                    Log.Add(e.ToString(),2);
+                }//stfu, failure is nothing to brag about
             }
-            //TODO return
+
+            return OutputList;
+
+            //for (int i = 0; i < TerminalBlockListCurrentGrid.Count; i++) {
+            // if (TerminalBlockListCurrentGrid[i].CustomName.Contains(LCD_Name))
+            // {
+            // if (TerminalBlockListCurrentGrid[i].BlockDefinition.ToString().Contains("ProgrammableBlock"))
+            // {
+            // IMyProgrammableBlock block = (IMyProgrammableBlock)TerminalBlockListCurrentGrid[i];
+            // outputLcdList.Add(block.GetSurface(0));
+            // }
+            // else
+            // outputLcdList.Add((IMyTextSurface)TerminalBlockListCurrentGrid[i]);
+            // 
+            // if (TerminalBlockListCurrentGrid[i].CustomName.Contains(my_Cockpit_name))
+            // my_Cockpit = (IMyCockpit)TerminalBlockListCurrentGrid[i];
+            // }
+            //}
         }
+
+        
 
         public Program()
         {
@@ -160,21 +188,8 @@ namespace IngameScript
             Dictionary<string, string> customData = ParseCustomData(Me, TODO);//Scan my Custom Data
             RescanBlocks();
 
-            for (int i = 0; i < TerminalBlockListCurrentGrid.Count; i++) {
-                if (TerminalBlockListCurrentGrid[i].CustomName.Contains(LCD_Name))
-                {
-                    if (TerminalBlockListCurrentGrid[i].BlockDefinition.ToString().Contains("ProgrammableBlock"))
-                    {
-                        IMyProgrammableBlock block = (IMyProgrammableBlock)TerminalBlockListCurrentGrid[i];
-                        outputLcdList.Add(block.GetSurface(0));
-                    }
-                    else
-                        outputLcdList.Add((IMyTextSurface)TerminalBlockListCurrentGrid[i]);
+            
 
-                    if (TerminalBlockListCurrentGrid[i].CustomName.Contains(my_Cockpit_name))
-                        my_Cockpit = (IMyCockpit)TerminalBlockListCurrentGrid[i];
-                }
-            }
         }
 
         public void Save()
@@ -223,7 +238,84 @@ namespace IngameScript
                     break;
                 case UpdateType.IGC:
                     break;
+                
             }
+
+            Log.Add("Update source: "+updateSource.ToString());
+        }
+    }
+
+    class Log {
+        private List<String> Messages = new List<string>();
+        private List<String> Warnings = new List<string>();
+        private List<String> Errors = new List<string>();
+        private string Prefix = "UFOslava's DCM Lift Control";
+        private int Iteration = 0;
+
+        public Log(string prefix)
+        {
+            Prefix = prefix;
+        }
+        public Log(){}
+
+
+        public void Add(string Content, int Type) {
+            switch (Type) {
+                case 1:
+                    Warnings.Add(Content);
+                    break;
+                case 2:
+                    Errors.Add(Content);
+                    break;
+                default:
+                    Messages.Add(Content);
+                    break;
+            }
+        }
+
+        public void Add(string Content) {
+            Messages.Add(Content);
+        }
+
+        private string RunIndicator() {
+            string Indicator = "/";
+            Iteration = ++Iteration % 4;
+            switch (Iteration) {
+                case 1:
+                    Indicator = "/";
+                    break;
+                case 2:
+                    Indicator = "--";
+                    break;
+                case 3:
+                    Indicator = @"\";
+                    break;
+                default:
+                    Indicator = "|";
+                    break;
+            }
+
+            return " " + Indicator;
+        }
+
+        public void Print(List<IMyTextSurface> LogScreens) {
+            string Output = Prefix + RunIndicator()+ "\n";//Add default massage
+            foreach (string Line in Messages) {
+                Output += Line + "\n";
+            }
+
+            Output += "\nWarnings:\n";
+            foreach (string Line in Warnings) {
+                Output += Line + "\n";
+            }
+
+            Output += "\nErrors:\n";
+            foreach (string Line in Errors) {
+                Output += Line + "\n";
+            }
+            Messages = new List<string>();//reset lists
+            Warnings = new List<string>();
+            Errors =new List<string>();
         }
     }
 }
