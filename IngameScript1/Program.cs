@@ -209,7 +209,7 @@ namespace IngameScript {
             //Runtime.UpdateFrequency = UpdateFrequency.Update10;
 
             //update block records
-            Dictionary<string, string> customData = ParseCustomData(Me, TODO); //Scan my Custom Data
+            Dictionary<string, string> customData = ParseCustomData(Me, SettingsDictionary); //Scan my Custom Data
             RescanBlocks();
         }
 
