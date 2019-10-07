@@ -61,7 +61,7 @@ namespace IngameScript {
             {"Bottom Sensor", "T:Bottom Sensor"}
         };
 
-        public Log Log = new Log("UFOslava's DCM Lift Control");
+        public LogEngine Log = new LogEngine("UFOslava's DCM Lift Control");
 
 
         public List<IMyTerminalBlock> GetBlocksByPattern(string Pattern) {
@@ -98,7 +98,7 @@ namespace IngameScript {
         public static Dictionary<string, string> ParseCustomData(IMyTerminalBlock Block, Dictionary<string, string> Settings) {
             Dictionary<string, string> CustomData = new Dictionary<string, string>();
             string[] CustomDataLines = Block.CustomData.Split(new char[] {'\r', '\n'}, StringSplitOptions.RemoveEmptyEntries);
-            for (int i = 0; i < CustomDataLines.Length; i++) {
+            for (int i = 0; i < CustomDataLines.Length; i++) {//TODO replace lines with dictionary cells.
                 string line = CustomDataLines[i];
                 string value;
 
@@ -262,15 +262,15 @@ namespace IngameScript {
         }
     }
 
-    class Log {
+    class LogEngine {
         private List<String> Messages = new List<string>();
         private List<String> Warnings = new List<string>();
         private List<String> Errors = new List<string>();
         private string Prefix = "UFOslava's DCM Lift Control";
         private int Iteration = 0;
 
-        public Log(string prefix) { Prefix = prefix; }
-        public Log() { }
+        public LogEngine(string prefix) { Prefix = prefix; }
+        public LogEngine() { }
 
 
         public void Add(string Content, int Type) {
