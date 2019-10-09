@@ -51,6 +51,7 @@ namespace IngameScript {
         public IMySensorBlock BottomSensorBlock = null;
         public static List<IMyTerminalBlock> TerminalBlockList = new List<IMyTerminalBlock>(); //declare an empty list of TerminalBlocks for later use in searches.
         public static List<IMyTerminalBlock> TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>(); // T:
+        public LogEngine Log = new LogEngine("UFOslava's DCM Lift Control");
 
         public Dictionary<string, string> SettingsDictionary = new Dictionary<string, string>() {
             {"Output LCD Name", "T:Status LCD"},
@@ -61,7 +62,6 @@ namespace IngameScript {
             {"Bottom Sensor", "T:Bottom Sensor"}
         };
 
-        public LogEngine Log = new LogEngine("UFOslava's DCM Lift Control");
 
 
         public List<IMyTerminalBlock> GetBlocksByPattern(string Pattern) {
@@ -96,58 +96,65 @@ namespace IngameScript {
 
         //parse Custom Data
         public static Dictionary<string, string> ParseCustomData(IMyTerminalBlock Block, Dictionary<string, string> Settings) {
-            Dictionary<string, string> CustomData = new Dictionary<string, string>();
+            var CustomData = new Dictionary<string, string>();//Original Data
+            var CustomDataSettings = new Dictionary<string, string>();//Parsed Data
             string[] CustomDataLines = Block.CustomData.Split(new char[] {'\r', '\n'}, StringSplitOptions.RemoveEmptyEntries);
-            for (int i = 0; i < CustomDataLines.Length; i++) {//TODO replace lines with dictionary cells.
-                string line = CustomDataLines[i];
+            for (var i = 0; i < CustomDataLines.Length; i++) { //scan and prepare Custom Data for matching
+                var line = CustomDataLines[i];
                 string value;
-
-                int pos = line.IndexOf('=');
+                var pos = line.IndexOf('=');
                 if (pos > -1) {
                     value = line.Substring(pos + 1).Trim();
                     line = line.Substring(0, pos).Trim();
                 } else {
                     value = "";
                 }
-
-                if (Settings.ContainsKey(line))
-                    CustomData.Add(line, value);
-                else {
-                    CustomData.Add(line, Settings[line]);
-                    Block.CustomData += "\n" + line + " = " + Settings[line];
-                }
+                CustomData.Add(line,value);//Save the setting
             }
 
-            return CustomData;
+            foreach (var Setting in Settings) {
+
+                    if (CustomData.ContainsKey(Setting.Key)) {
+                        CustomDataSettings.Add(Setting.Key, CustomData[Setting.Key]);
+                    } else {
+                        CustomData.Add(Setting.Key, Setting.Value);
+                        Block.CustomData += "\n" + Setting.Key + " = " + Setting.Value;
+                    }
+                }
+
+            return CustomDataSettings;
         }
 
-        bool FilterThis(IMyTerminalBlock block) { return block.CubeGrid == Me.CubeGrid; }
+        public bool FilterThis(IMyTerminalBlock block) { return block.CubeGrid == Me.CubeGrid; }
 
         void RescanBlocks() {
-            //reset Block lists
-            SettingsDictionary = ParseCustomData(Me, SettingsDictionary);
-            TerminalBlockList = new List<IMyTerminalBlock>();
-            TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>();
+            try { //reset Block lists
+                SettingsDictionary = ParseCustomData(Me, SettingsDictionary);
+                TerminalBlockList = new List<IMyTerminalBlock>();
+                TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>();
 
-            GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(TerminalBlockList); //Acquire all "Smart" blocks
-            foreach (IMyTerminalBlock Block in TerminalBlockList) {
-                if (FilterThis(Block))
-                    TerminalBlockListCurrentGrid.Add(Block); //Get Blocks of current Grid.
+                GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(TerminalBlockList); //Acquire all "Smart" blocks
+                foreach (IMyTerminalBlock Block in TerminalBlockList) {
+                    if (FilterThis(Block))
+                        TerminalBlockListCurrentGrid.Add(Block); //Get Blocks of current Grid.
+                }
+
+                //Find specific Blocks
+                TopConnector = (IMyShipConnector) GetBlocksByPattern(SettingsDictionary["Top Floor Connector"])[0];
+                Log.Add("Top Conector: " + TopConnector.CustomName);
+                BottomConnector = (IMyShipConnector) GetBlocksByPattern(SettingsDictionary["Bottom Floor Connector"])[0];
+                Log.Add("Bottom Conector: " + BottomConnector.CustomName);
+                CruiseControlProgrammableBlock = (IMyProgrammableBlock) GetBlocksByPattern(SettingsDictionary["Cruise Control PB"])[0];
+                Log.Add("CC: " + CruiseControlProgrammableBlock.CustomName);
+                TopSensorBlock = (IMySensorBlock) GetBlocksByPattern(SettingsDictionary["Top Sensor"])[0];
+                Log.Add("Top Sensor: " + TopSensorBlock.CustomName);
+                BottomSensorBlock = (IMySensorBlock) GetBlocksByPattern(SettingsDictionary["Bottom Sensor"])[0];
+                Log.Add("Bottom Sensor: " + BottomSensorBlock.CustomName);
+                //Output screens
+                outputLcdList = GetTextSurfaces("Output LCD Name");
+            } catch (Exception e) {
+                Log.Add(e.Message,Log.Error);
             }
-
-            //Find specific Blocks
-            TopConnector = (IMyShipConnector) GetBlocksByPattern(SettingsDictionary["Top Floor Connector"])[0];
-            Log.Add("Top Conector: " + TopConnector.CustomName);
-            BottomConnector = (IMyShipConnector) GetBlocksByPattern(SettingsDictionary["Bottom Floor Connector"])[0];
-            Log.Add("Bottom Conector: " + BottomConnector.CustomName);
-            CruiseControlProgrammableBlock = (IMyProgrammableBlock) GetBlocksByPattern(SettingsDictionary["Cruise Control PB"])[0];
-            Log.Add("CC: " + CruiseControlProgrammableBlock.CustomName);
-            TopSensorBlock = (IMySensorBlock) GetBlocksByPattern(SettingsDictionary["Top Sensor"])[0];
-            Log.Add("Top Sensor: " + TopSensorBlock.CustomName);
-            BottomSensorBlock = (IMySensorBlock) GetBlocksByPattern(SettingsDictionary["Bottom Sensor"])[0];
-            Log.Add("Bottom Sensor: " + BottomSensorBlock.CustomName);
-            //Output screens
-            outputLcdList = GetTextSurfaces("Output LCD Name");
         }
 
         public List<IMyTextSurface> GetTextSurfaces(string pattern) {
@@ -206,7 +213,7 @@ namespace IngameScript {
             // It's recommended to set Runtime.UpdateFrequency 
             // here, which will allow your script to run itself without a 
             // timer block.
-            //Runtime.UpdateFrequency = UpdateFrequency.Update10;
+            Runtime.UpdateFrequency = UpdateFrequency.Update100;
 
             //update block records
             Dictionary<string, string> customData = ParseCustomData(Me, SettingsDictionary); //Scan my Custom Data
@@ -258,16 +265,19 @@ namespace IngameScript {
                     break;
             }
 
-            Log.Add("Update source: " + updateSource.ToString());
+            Log.Add("Update source: " + updateSource);
+            Log.Print(outputLcdList);
         }
     }
 
-    class LogEngine {
+    public class LogEngine {
         private List<String> Messages = new List<string>();
         private List<String> Warnings = new List<string>();
         private List<String> Errors = new List<string>();
         private string Prefix = "UFOslava's DCM Lift Control";
         private int Iteration = 0;
+        public int Warning = 1;
+        public int Error = 2;
 
         public LogEngine(string prefix) { Prefix = prefix; }
         public LogEngine() { }
@@ -324,6 +334,11 @@ namespace IngameScript {
             Output += "\nErrors:\n";
             foreach (string Line in Errors) {
                 Output += Line + "\n";
+            }
+
+            foreach (IMyTextSurface Screen in LogScreens) {
+                Screen.WriteText(Output);
+                //add write to console.
             }
 
             Messages = new List<string>(); //reset lists
