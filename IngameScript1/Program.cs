@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text;
 using System;
 using Sandbox.Game.Entities.Blocks;
+using Sandbox.ModAPI;
 using VRage.Collections;
 using VRage.Game.Components;
 using VRage.Game.GUI.TextPanel;
@@ -17,6 +18,14 @@ using VRage.Game.ObjectBuilders.Definitions;
 using VRage.Game;
 using VRage;
 using VRageMath;
+using IMyCryoChamber = Sandbox.ModAPI.Ingame.IMyCryoChamber;
+using IMyProgrammableBlock = Sandbox.ModAPI.Ingame.IMyProgrammableBlock;
+using IMySensorBlock = Sandbox.ModAPI.Ingame.IMySensorBlock;
+using IMyShipConnector = Sandbox.ModAPI.Ingame.IMyShipConnector;
+using IMyTerminalBlock = Sandbox.ModAPI.Ingame.IMyTerminalBlock;
+using IMyTextSurface = Sandbox.ModAPI.Ingame.IMyTextSurface;
+using IMyTextSurfaceProvider = Sandbox.ModAPI.Ingame.IMyTextSurfaceProvider;
+
 
 namespace IngameScript {
     class Program : MyGridProgram {
@@ -40,7 +49,6 @@ namespace IngameScript {
         // https://github.com/malware-dev/MDK-SE/wiki/Quick-Introduction-to-Space-Engineers-Ingame-Scripts
         //
         // to learn more about ingame scripts.
-
         public List<IMyTextSurface> outputLcdList;
         public List<IMyLandingGear> bottomLandingGearsList;
         public List<IMyLandingGear> topLandingGearsList;
@@ -51,26 +59,15 @@ namespace IngameScript {
         public IMySensorBlock BottomSensorBlock = null;
         public static List<IMyTerminalBlock> TerminalBlockList = new List<IMyTerminalBlock>(); //declare an empty list of TerminalBlocks for later use in searches.
         public static List<IMyTerminalBlock> TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>(); // T:
-        public LogEngine Log = new LogEngine("UFOslava's DCM Lift Control");
+        public Dictionary<string, string> SettingsDictionary = new Dictionary<string, string>() {{"Output LCD Name", "T:Status LCD"}, {"Top Floor Connector", "T:Top Connector"}, {"Bottom Floor Connector", "T:Bottom Connector"}, {"Cruise Control PB", "T:Cruise Control"}, {"Top Sensor", "T:Top Sensor"}, {"Bottom Sensor", "T:Bottom Sensor"}};
+        public LogEngine Log;
 
-        public Dictionary<string, string> SettingsDictionary = new Dictionary<string, string>() {
-            {"Output LCD Name", "T:Status LCD"},
-            {"Top Floor Connector", "T:Top Connector"},
-            {"Bottom Floor Connector", "T:Bottom Connector"},
-            {"Cruise Control PB", "T:Cruise Control"},
-            {"Top Sensor", "T:Top Sensor"},
-            {"Bottom Sensor", "T:Bottom Sensor"}
-        };
-
-
-
-        public List<IMyTerminalBlock> GetBlocksByPattern(string Pattern) {
+        public List<IMyTerminalBlock> GetBlocksByPattern(string Pattern) { //Get AutoLCD2 type pattern, get back requested blocks, from current grids or otherwise.
             if (Pattern == null) {
                 return TerminalBlockList; //return all on empty patern
             }
 
             List<IMyTerminalBlock> ReturnList = new List<IMyTerminalBlock>();
-
             if (Pattern.StartsWith("T:")) { //Return current grid Blocks only, by name.
                 Pattern = Pattern.Substring(2); //Update pattern with T: removed.
                 foreach (IMyTerminalBlock Block in TerminalBlockListCurrentGrid) {
@@ -95,9 +92,9 @@ namespace IngameScript {
         }
 
         //parse Custom Data
-        public static Dictionary<string, string> ParseCustomData(IMyTerminalBlock Block, Dictionary<string, string> Settings) {
-            var CustomData = new Dictionary<string, string>();//Original Data
-            var CustomDataSettings = new Dictionary<string, string>();//Parsed Data
+        public static Dictionary<string, string> ParseCustomData(IMyTerminalBlock Block, Dictionary<string, string> Settings) { //Get current CustomData and parse values requested by the dictionary.
+            var CustomData = new Dictionary<string, string>(); //Original Data
+            var CustomDataSettings = new Dictionary<string, string>(); //Parsed Data
             string[] CustomDataLines = Block.CustomData.Split(new char[] {'\r', '\n'}, StringSplitOptions.RemoveEmptyEntries);
             for (var i = 0; i < CustomDataLines.Length; i++) { //scan and prepare Custom Data for matching
                 var line = CustomDataLines[i];
@@ -109,18 +106,18 @@ namespace IngameScript {
                 } else {
                     value = "";
                 }
-                CustomData.Add(line,value);//Save the setting
+
+                CustomData.Add(line, value); //Save the setting
             }
 
             foreach (var Setting in Settings) {
-
-                    if (CustomData.ContainsKey(Setting.Key)) {
-                        CustomDataSettings.Add(Setting.Key, CustomData[Setting.Key]);
-                    } else {
-                        CustomData.Add(Setting.Key, Setting.Value);
-                        Block.CustomData += "\n" + Setting.Key + " = " + Setting.Value;
-                    }
+                if (CustomData.ContainsKey(Setting.Key)) {
+                    CustomDataSettings.Add(Setting.Key, CustomData[Setting.Key]);
+                } else {
+                    CustomData.Add(Setting.Key, Setting.Value);
+                    Block.CustomData += "\n" + Setting.Key + " = " + Setting.Value;
                 }
+            }
 
             return CustomDataSettings;
         }
@@ -132,7 +129,6 @@ namespace IngameScript {
                 SettingsDictionary = ParseCustomData(Me, SettingsDictionary);
                 TerminalBlockList = new List<IMyTerminalBlock>();
                 TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>();
-
                 GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(TerminalBlockList); //Acquire all "Smart" blocks
                 foreach (IMyTerminalBlock Block in TerminalBlockList) {
                     if (FilterThis(Block))
@@ -150,10 +146,11 @@ namespace IngameScript {
                 Log.Add("Top Sensor: " + TopSensorBlock.CustomName);
                 BottomSensorBlock = (IMySensorBlock) GetBlocksByPattern(SettingsDictionary["Bottom Sensor"])[0];
                 Log.Add("Bottom Sensor: " + BottomSensorBlock.CustomName);
+                //TODO scan landing gears by orientation
                 //Output screens
                 outputLcdList = GetTextSurfaces("Output LCD Name");
             } catch (Exception e) {
-                Log.Add(e.Message,Log.Error);
+                Log.Add(e.Message, Log.Error);
             }
         }
 
@@ -182,7 +179,7 @@ namespace IngameScript {
 
             return OutputList;
 
-
+            //OG code for getting screens
 //                if (!(Block is IMyCockpit cockpit) && !(Block is IMyTextSurface surface))
 //                    continue;
 //
@@ -199,25 +196,6 @@ namespace IngameScript {
 //                        my_Cockpit = (IMyCockpit) TerminalBlockListCurrentGrid[i];
 //                }
 //            }
-        }
-
-
-        public Program() {
-            // The constructor, called only once every session and
-            // always before any other method is called. Use it to
-            // initialize your script. 
-            //     
-            // The constructor is optional and can be removed if not
-            // needed.
-            // 
-            // It's recommended to set Runtime.UpdateFrequency 
-            // here, which will allow your script to run itself without a 
-            // timer block.
-            Runtime.UpdateFrequency = UpdateFrequency.Update100;
-
-            //update block records
-            Dictionary<string, string> customData = ParseCustomData(Me, SettingsDictionary); //Scan my Custom Data
-            RescanBlocks();
         }
 
         public void Save() {
@@ -239,7 +217,6 @@ namespace IngameScript {
             // 
             // The method itself is required, but the arguments above
             // can be removed if not needed.
-
             switch (updateSource) {
                 case UpdateType.None:
                     break;
@@ -266,11 +243,33 @@ namespace IngameScript {
             }
 
             Log.Add("Update source: " + updateSource);
+            RescanBlocks();
             Log.Print(outputLcdList);
+        }
+
+
+        public Program() {
+            // The constructor, called only once every session and
+            // always before any other method is called. Use it to
+            // initialize your script. 
+            //     
+            // The constructor is optional and can be removed if not
+            // needed.
+            // 
+            // It's recommended to set Runtime.UpdateFrequency 
+            // here, which will allow your script to run itself without a 
+            // timer block.
+            Runtime.UpdateFrequency = UpdateFrequency.Update100;
+            Log = new LogEngine(this, "UFOslava's DCM Lift Control");
+
+            //update block records
+            Dictionary<string, string> customData = ParseCustomData(Me, SettingsDictionary); //Scan my Custom Data
+            RescanBlocks();
         }
     }
 
     public class LogEngine {
+        private readonly MyGridProgram _program;
         private List<String> Messages = new List<string>();
         private List<String> Warnings = new List<string>();
         private List<String> Errors = new List<string>();
@@ -279,9 +278,12 @@ namespace IngameScript {
         public int Warning = 1;
         public int Error = 2;
 
-        public LogEngine(string prefix) { Prefix = prefix; }
-        public LogEngine() { }
+        public LogEngine(MyGridProgram Program, string prefix) {
+            _program = Program;
+            Prefix = prefix;
+        }
 
+        public LogEngine(MyGridProgram Program) { _program = Program; }
 
         public void Add(string Content, int Type) {
             switch (Type) {
@@ -321,6 +323,8 @@ namespace IngameScript {
         }
 
         public void Print(List<IMyTextSurface> LogScreens) {
+            if (LogScreens == null)
+                throw new ArgumentNullException(nameof(LogScreens));
             string Output = Prefix + RunIndicator() + "\n"; //Add default massage
             foreach (string Line in Messages) {
                 Output += Line + "\n";
@@ -338,7 +342,7 @@ namespace IngameScript {
 
             foreach (IMyTextSurface Screen in LogScreens) {
                 Screen.WriteText(Output);
-                //add write to console.
+                _program.Echo(Output);
             }
 
             Messages = new List<string>(); //reset lists
