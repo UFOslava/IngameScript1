@@ -52,8 +52,9 @@ namespace IngameScript {
         public List<IMyTextSurface> outputLcdList;
         public List<IMyLandingGear> bottomLandingGearsList;
         public List<IMyLandingGear> topLandingGearsList;
-        public IMyShipConnector BottomConnector = null;
         public IMyShipConnector TopConnector = null;
+        public IMyShipConnector BottomConnector = null;
+        public IMyShipConnector Block = null;
         public IMyProgrammableBlock CruiseControlProgrammableBlock = null;
         public IMySensorBlock TopSensorBlock = null;
         public IMySensorBlock BottomSensorBlock = null;
@@ -125,32 +126,49 @@ namespace IngameScript {
         public bool FilterThis(IMyTerminalBlock block) { return block.CubeGrid == Me.CubeGrid; }
 
         void RescanBlocks() {
-            try { //reset Block lists
-                SettingsDictionary = ParseCustomData(Me, SettingsDictionary);
-                TerminalBlockList = new List<IMyTerminalBlock>();
-                TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>();
-                GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(TerminalBlockList); //Acquire all "Smart" blocks
-                foreach (IMyTerminalBlock Block in TerminalBlockList) {
-                    if (FilterThis(Block))
-                        TerminalBlockListCurrentGrid.Add(Block); //Get Blocks of current Grid.
-                }
+            IMyTerminalBlock tempTerminalBlock;
 
+            SettingsDictionary = ParseCustomData(Me, SettingsDictionary);
+
+            TerminalBlockList = new List<IMyTerminalBlock>();//reset Block lists
+            TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>();
+
+            GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(TerminalBlockList); //Acquire all "Smart" blocks
+            //Echo("Total terminal blocks in the grid: " + TerminalBlockList.Count + "\n");
+            foreach (IMyTerminalBlock Block in TerminalBlockList) {
+                if (FilterThis(Block))
+                    TerminalBlockListCurrentGrid.Add(Block); //Get Blocks of current Grid.
+            }
+
+            try
+            {
                 //Find specific Blocks
-                TopConnector = (IMyShipConnector) GetBlocksByPattern(SettingsDictionary["Top Floor Connector"])[0];
-                Log.Add("Top Conector: " + TopConnector.CustomName);
-                BottomConnector = (IMyShipConnector) GetBlocksByPattern(SettingsDictionary["Bottom Floor Connector"])[0];
-                Log.Add("Bottom Conector: " + BottomConnector.CustomName);
-                CruiseControlProgrammableBlock = (IMyProgrammableBlock) GetBlocksByPattern(SettingsDictionary["Cruise Control PB"])[0];
-                Log.Add("CC: " + CruiseControlProgrammableBlock.CustomName);
-                TopSensorBlock = (IMySensorBlock) GetBlocksByPattern(SettingsDictionary["Top Sensor"])[0];
-                Log.Add("Top Sensor: " + TopSensorBlock.CustomName);
-                BottomSensorBlock = (IMySensorBlock) GetBlocksByPattern(SettingsDictionary["Bottom Sensor"])[0];
-                Log.Add("Bottom Sensor: " + BottomSensorBlock.CustomName);
+                TopConnector = (IMyShipConnector)GetSingleBlock("Top Floor Connector", "Top Floor Connector");
+                BottomConnector = (IMyShipConnector)GetSingleBlock("Bottom Floor Connector", "Bottom Floor Connector");
+                //Log.Add("Bottom Conector: " + BottomConnector.CustomName);
+                //CruiseControlProgrammableBlock = (IMyProgrammableBlock) GetBlocksByPattern(SettingsDictionary["Cruise Control PB"])[0];
+                //Log.Add("CC: " + CruiseControlProgrammableBlock.CustomName);
+                //TopSensorBlock = (IMySensorBlock) GetBlocksByPattern(SettingsDictionary["Top Sensor"])[0];
+                //Log.Add("Top Sensor: " + TopSensorBlock.CustomName);
+                //BottomSensorBlock = (IMySensorBlock) GetBlocksByPattern(SettingsDictionary["Bottom Sensor"])[0];
+                //Log.Add("Bottom Sensor: " + BottomSensorBlock.CustomName);
                 //TODO scan landing gears by orientation
                 //Output screens
                 outputLcdList = GetTextSurfaces("Output LCD Name");
-            } catch (Exception e) {
-                Log.Add(e.Message, Log.Error);
+            }
+            catch (Exception e) {
+                Log.Add(e.Message + "\n" + e.Source + "\n", Log.Error);
+            }
+        }
+
+        private IMyTerminalBlock GetSingleBlock(String BlockName, String SettingsDictionaryKey) {
+            if (GetBlocksByPattern(SettingsDictionary[SettingsDictionaryKey]).Count > 0) {
+                Log.Add(BlockName + ": " + Block.CustomName);
+
+                return GetBlocksByPattern(SettingsDictionary[SettingsDictionaryKey])[0];
+            } else {
+                Log.Add(BlockName + " not found");
+                return null;
             }
         }
 
@@ -323,8 +341,6 @@ namespace IngameScript {
         }
 
         public void Print(List<IMyTextSurface> LogScreens) {
-            if (LogScreens == null)
-                throw new ArgumentNullException(nameof(LogScreens));
             string Output = Prefix + RunIndicator() + "\n"; //Add default massage
             foreach (string Line in Messages) {
                 Output += Line + "\n";
@@ -340,10 +356,15 @@ namespace IngameScript {
                 Output += Line + "\n";
             }
 
-            foreach (IMyTextSurface Screen in LogScreens) {
-                Screen.WriteText(Output);
-                _program.Echo(Output);
+            if (LogScreens == null) {
+                Output += "No output screens detected.\n";
+            } else {
+                foreach (IMyTextSurface Screen in LogScreens) {
+                    Screen.WriteText(Output);
+                }
             }
+
+            _program.Echo(Output);
 
             Messages = new List<string>(); //reset lists
             Warnings = new List<string>();
