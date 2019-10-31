@@ -49,15 +49,15 @@ namespace IngameScript {
         // https://github.com/malware-dev/MDK-SE/wiki/Quick-Introduction-to-Space-Engineers-Ingame-Scripts
         //
         // to learn more about ingame scripts.
-        public List<IMyTextSurface> outputLcdList;
-        public List<IMyLandingGear> bottomLandingGearsList;
-        public List<IMyLandingGear> topLandingGearsList;
-        public IMyShipConnector TopConnector = null;
-        public IMyShipConnector BottomConnector = null;
-        public IMyShipConnector Block = null;
+        public List<IMyTextSurface> OutputLcdList = new List<IMyTextSurface>();
+        public List<IMyLandingGear> BottomLandingGearsList = new List<IMyLandingGear>();
+        public List<IMyLandingGear> TopLandingGearsList = new List<IMyLandingGear>();
+        public List<IMyShipConnector> TopConnector = new List<IMyShipConnector>();
+        public List<IMyShipConnector> BottomConnector = new List<IMyShipConnector>();
+        public List<IMyShipConnector> Block = new List<IMyShipConnector>();
         public IMyProgrammableBlock CruiseControlProgrammableBlock = null;
-        public IMySensorBlock TopSensorBlock = null;
-        public IMySensorBlock BottomSensorBlock = null;
+        public List<IMySensorBlock> TopSensorBlock = new List<IMySensorBlock>();
+        public List<IMySensorBlock> BottomSensorBlock = new List<IMySensorBlock>();
         public static List<IMyTerminalBlock> TerminalBlockList = new List<IMyTerminalBlock>(); //declare an empty list of TerminalBlocks for later use in searches.
         public static List<IMyTerminalBlock> TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>(); // T:
         public Dictionary<string, string> SettingsDictionary = new Dictionary<string, string>() {{"Output LCD Name", "T:Status LCD"}, {"Top Floor Connector", "T:Top Connector"}, {"Bottom Floor Connector", "T:Bottom Connector"}, {"Cruise Control PB", "T:Cruise Control"}, {"Top Sensor", "T:Top Sensor"}, {"Bottom Sensor", "T:Bottom Sensor"}};
@@ -143,32 +143,21 @@ namespace IngameScript {
             try
             {
                 //Find specific Blocks
-                TopConnector = (IMyShipConnector)GetSingleBlock("Top Floor Connector", "Top Floor Connector");
-                BottomConnector = (IMyShipConnector)GetSingleBlock("Bottom Floor Connector", "Bottom Floor Connector");
+                TopConnector = GetBlocksByPattern(SettingsDictionary["Top Floor Connector"]).Cast<IMyShipConnector>().ToList();
+                BottomConnector = GetBlocksByPattern(SettingsDictionary["Bottom Floor Connector"]).Cast<IMyShipConnector>().ToList();
                 //Log.Add("Bottom Conector: " + BottomConnector.CustomName);
-                //CruiseControlProgrammableBlock = (IMyProgrammableBlock) GetBlocksByPattern(SettingsDictionary["Cruise Control PB"])[0];
+                CruiseControlProgrammableBlock = (IMyProgrammableBlock) GetBlocksByPattern(SettingsDictionary["Cruise Control PB"])[0];
                 //Log.Add("CC: " + CruiseControlProgrammableBlock.CustomName);
-                //TopSensorBlock = (IMySensorBlock) GetBlocksByPattern(SettingsDictionary["Top Sensor"])[0];
+                TopSensorBlock = GetBlocksByPattern(SettingsDictionary["Top Sensor"]).Cast<IMySensorBlock>().ToList();
                 //Log.Add("Top Sensor: " + TopSensorBlock.CustomName);
-                //BottomSensorBlock = (IMySensorBlock) GetBlocksByPattern(SettingsDictionary["Bottom Sensor"])[0];
+                BottomSensorBlock = GetBlocksByPattern(SettingsDictionary["Bottom Sensor"]).Cast<IMySensorBlock>().ToList();
                 //Log.Add("Bottom Sensor: " + BottomSensorBlock.CustomName);
                 //TODO scan landing gears by orientation
                 //Output screens
-                outputLcdList = GetTextSurfaces("Output LCD Name");
+                OutputLcdList = GetTextSurfaces("Output LCD Name");
             }
             catch (Exception e) {
                 Log.Add(e.Message + "\n" + e.Source + "\n", Log.Error);
-            }
-        }
-
-        private IMyTerminalBlock GetSingleBlock(String BlockName, String SettingsDictionaryKey) {
-            if (GetBlocksByPattern(SettingsDictionary[SettingsDictionaryKey]).Count > 0) {
-                Log.Add(BlockName + ": " + Block.CustomName);
-
-                return GetBlocksByPattern(SettingsDictionary[SettingsDictionaryKey])[0];
-            } else {
-                Log.Add(BlockName + " not found");
-                return null;
             }
         }
 
@@ -262,7 +251,7 @@ namespace IngameScript {
 
             Log.Add("Update source: " + updateSource);
             RescanBlocks();
-            Log.Print(outputLcdList);
+            Log.Print(OutputLcdList);
         }
 
 
