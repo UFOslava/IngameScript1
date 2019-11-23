@@ -157,7 +157,7 @@ namespace IngameScript {
                 OutputLcdList = GetTextSurfaces("Output LCD Name");
             }
             catch (Exception e) {
-                Log.Add(e.Message + "\n" + e.Source + "\n", Log.Error);
+                Log.Add(e.Message + "\n(in Blocks lookup)", Log.Error);
             }
         }
 
@@ -169,12 +169,16 @@ namespace IngameScript {
                     continue;
                 }
 
-                if (block is IMyTextSurfaceProvider && !(block is IMyCryoChamber)) {
-                    try {
-                        OutputList.Add(((IMyTextSurfaceProvider) block).GetSurface(0));
-                    } catch (Exception e) {
-                        Log.Add(e.ToString());
+                IMyTextSurfaceProvider provider = block as IMyTextSurfaceProvider;
+                if (provider != null) {
+                    if (provider.GetSurface(0) != null) {
+                        try {
+                            OutputList.Add(provider.GetSurface(0));
+                        } catch (Exception e) {
+                            Log.Add(e.ToString());
+                        }
                     }
+
 
                     continue;
                 }
@@ -267,6 +271,7 @@ namespace IngameScript {
             // here, which will allow your script to run itself without a 
             // timer block.
             Runtime.UpdateFrequency = UpdateFrequency.Update100;
+            UpdateFrequency.
             Log = new LogEngine(this, "UFOslava's DCM Lift Control");
 
             //update block records
@@ -331,33 +336,45 @@ namespace IngameScript {
 
         public void Print(List<IMyTextSurface> LogScreens) {
             string Output = Prefix + RunIndicator() + "\n"; //Add default massage
+            _program.Echo("Detected screens: " + LogScreens.Count);
             foreach (string Line in Messages) {
                 Output += Line + "\n";
             }
+
+            Messages = new List<string>(); //reset lists
 
             Output += "\nWarnings:\n";
             foreach (string Line in Warnings) {
                 Output += Line + "\n";
             }
 
+            Warnings = new List<string>();
+
             Output += "\nErrors:\n";
             foreach (string Line in Errors) {
                 Output += Line + "\n";
             }
 
-            if (LogScreens == null) {
+            Errors = new List<string>();
+
+            if (LogScreens.Count <= 0) {
                 Output += "No output screens detected.\n";
-            } else {
-                foreach (IMyTextSurface Screen in LogScreens) {
+            }
+
+            foreach (IMyTextSurface Screen in LogScreens) {
+                try
+                {
+                    Screen.ContentType = ContentType.TEXT_AND_IMAGE;
+                    _program.Echo("Screen: " + Screen.Name);
+
                     Screen.WriteText(Output);
+                } catch {
+                    _program.Echo(Screen.Name + " is not a valid screen.");
                 }
             }
 
-            _program.Echo(Output);
 
-            Messages = new List<string>(); //reset lists
-            Warnings = new List<string>();
-            Errors = new List<string>();
+            _program.Echo(Output);
         }
     }
 }
