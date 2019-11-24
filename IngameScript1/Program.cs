@@ -29,22 +29,6 @@ using IMyTextSurfaceProvider = Sandbox.ModAPI.Ingame.IMyTextSurfaceProvider;
 
 namespace IngameScript {
     class Program : MyGridProgram {
-        // This file contains your actual script.
-        //
-        // You can either keep all your code here, or you can create separate
-        // code files to make your program easier to navigate while coding.
-        //
-        // In order to add a new utility class, right-click on your project, 
-        // select 'New' then 'Add Item...'. Now find the 'Space Engineers'
-        // category under 'Visual C# Items' on the left hand side, and select
-        // 'Utility Class' in the main area. Name it in the box below, and
-        // press OK. This utility class will be merged in with your code when
-        // deploying your final script.
-        //
-        // You can also simply create a new utility class manually, you don't
-        // have to use the template if you don't want to. Just do so the first
-        // time to see what a utility class looks like.
-        // 
         // Go to:
         // https://github.com/malware-dev/MDK-SE/wiki/Quick-Introduction-to-Space-Engineers-Ingame-Scripts
         //
@@ -54,14 +38,16 @@ namespace IngameScript {
         public List<IMyLandingGear> TopLandingGearsList = new List<IMyLandingGear>();
         public List<IMyShipConnector> TopConnector = new List<IMyShipConnector>();
         public List<IMyShipConnector> BottomConnector = new List<IMyShipConnector>();
-        public List<IMyShipConnector> Block = new List<IMyShipConnector>();
-        public IMyProgrammableBlock CruiseControlProgrammableBlock = null;
+        public List<IMyProgrammableBlock> CruiseControlProgrammableBlock = new List<IMyProgrammableBlock>();
         public List<IMySensorBlock> TopSensorBlock = new List<IMySensorBlock>();
         public List<IMySensorBlock> BottomSensorBlock = new List<IMySensorBlock>();
+        public List<IMySensorBlock> PeopleSensorBlock = new List<IMySensorBlock>();
         public static List<IMyTerminalBlock> TerminalBlockList = new List<IMyTerminalBlock>(); //declare an empty list of TerminalBlocks for later use in searches.
         public static List<IMyTerminalBlock> TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>(); // T:
-        public Dictionary<string, string> SettingsDictionary = new Dictionary<string, string>() {{"Output LCD Name", "T:Status LCD"}, {"Top Floor Connector", "T:Top Connector"}, {"Bottom Floor Connector", "T:Bottom Connector"}, {"Cruise Control PB", "T:Cruise Control"}, {"Top Sensor", "T:Top Sensor"}, {"Bottom Sensor", "T:Bottom Sensor"}};
+        public Dictionary<string, string> SettingsDictionary = new Dictionary<string, string>() {{"Output LCD Name", "T:Status LCD"}, {"Top Floor Connector", "T:Top Connector"}, {"Bottom Floor Connector", "T:Bottom Connector"}, {"Cruise Control PB", "T:Cruise Control"}, {"Top Sensor", "T:Top Sensor"}, {"Bottom Sensor", "T:Bottom Sensor"}, {"Passengers Sensor","T:People Sensor" } };
         public LogEngine Log;
+        public int Iteration = 0;//Counts script iterations for unfrequent task schedling and task load distribution.
+        public int IterativeMultiplier = 1;//Compensates for script execution speed
 
         public List<IMyTerminalBlock> GetBlocksByPattern(string Pattern) { //Get AutoLCD2 type pattern, get back requested blocks, from current grids or otherwise.
             if (Pattern == null) {
@@ -144,13 +130,27 @@ namespace IngameScript {
             {
                 //Find specific Blocks
                 TopConnector = GetBlocksByPattern(SettingsDictionary["Top Floor Connector"]).Cast<IMyShipConnector>().ToList();
+                if (TopConnector.Count <= 0)
+                {
+                    Log.Add("Top Floor Connector not found!",Log.Error);
+                }
                 BottomConnector = GetBlocksByPattern(SettingsDictionary["Bottom Floor Connector"]).Cast<IMyShipConnector>().ToList();
+                if (BottomConnector.Count <= 0)
+                {
+                    Log.Add("Bottom Floor Connector not found!", Log.Error);
+                }
                 //Log.Add("Bottom Conector: " + BottomConnector.CustomName);
-                CruiseControlProgrammableBlock = (IMyProgrammableBlock) GetBlocksByPattern(SettingsDictionary["Cruise Control PB"])[0];
-                //Log.Add("CC: " + CruiseControlProgrammableBlock.CustomName);
+                CruiseControlProgrammableBlock = GetBlocksByPattern(SettingsDictionary["Cruise Control PB"]).Cast<IMyProgrammableBlock>().ToList();
+                if (CruiseControlProgrammableBlock.Count <= 0)
+                {
+                    Log.Add("Cruise Control PB not found!", Log.Error);
+                }
+                //TODO add te rest of the validations
+
                 TopSensorBlock = GetBlocksByPattern(SettingsDictionary["Top Sensor"]).Cast<IMySensorBlock>().ToList();
                 //Log.Add("Top Sensor: " + TopSensorBlock.CustomName);
                 BottomSensorBlock = GetBlocksByPattern(SettingsDictionary["Bottom Sensor"]).Cast<IMySensorBlock>().ToList();
+                PeopleSensorBlock = GetBlocksByPattern(SettingsDictionary["Passengers Sensor"]).Cast<IMySensorBlock>().ToList();
                 //Log.Add("Bottom Sensor: " + BottomSensorBlock.CustomName);
                 //TODO scan landing gears by orientation
                 //Output screens
@@ -159,6 +159,7 @@ namespace IngameScript {
             catch (Exception e) {
                 Log.Add(e.Message + "\n(in Blocks lookup)", Log.Error);
             }
+            Log.Add("Blocks rescanned");
         }
 
         public List<IMyTextSurface> GetTextSurfaces(string pattern) {
@@ -228,12 +229,36 @@ namespace IngameScript {
             // 
             // The method itself is required, but the arguments above
             // can be removed if not needed.
+            Log.Add("Update source: " + updateSource);
+            Log.Add("Current Iteration: " + Iteration + "/" + 4 * IterativeMultiplier);
+            if (argument.Length > 0)
+            {
+                Log.Add("Argument: " + argument);
+            } else {
+                Log.Add("No Argument.");
+            }
             switch (updateSource) {
+               
                 case UpdateType.None:
                     break;
-                case UpdateType.Terminal:
-                    break;
-                case UpdateType.Trigger:
+                case UpdateType.Terminal://Script call trough terminal window
+                    //break;
+                case UpdateType.Trigger://Script call
+                    if (argument.ToLower().Contains("set100"))
+                    {
+                        Runtime.UpdateFrequency = UpdateFrequency.Update100;
+                        break;
+                    }
+                    else if (argument.ToLower().Contains("set10"))
+                    {
+                        Runtime.UpdateFrequency = UpdateFrequency.Update10;
+                        break;
+                    }
+                    else if (argument.ToLower().Contains("set1"))
+                    {
+                        Runtime.UpdateFrequency = UpdateFrequency.Update1;
+                        break;
+                    }
                     break;
                 case UpdateType.Antenna:
                     break;
@@ -242,19 +267,28 @@ namespace IngameScript {
                 case UpdateType.Script:
                     break;
                 case UpdateType.Update1:
-                    break;
+                    IterativeMultiplier = 100;
+                    goto Update; 
                 case UpdateType.Update10:
-                    break;
+                    IterativeMultiplier = 10;
+                    goto Update;
                 case UpdateType.Update100:
+                    IterativeMultiplier = 1;
+                    Update://"goto" landing
+                    Iteration = ++Iteration % (4*IterativeMultiplier);//Adjust by amount of idle tasks
+                    switch (Iteration) {
+                        case 0://rescan blocks
+                            RescanBlocks();
+                            break;
+                        default:
+                            break;
+                    }
                     break;
                 case UpdateType.Once:
                     break;
                 case UpdateType.IGC:
                     break;
             }
-
-            Log.Add("Update source: " + updateSource);
-            RescanBlocks();
             Log.Print(OutputLcdList);
         }
 
@@ -271,7 +305,6 @@ namespace IngameScript {
             // here, which will allow your script to run itself without a 
             // timer block.
             Runtime.UpdateFrequency = UpdateFrequency.Update100;
-            UpdateFrequency.
             Log = new LogEngine(this, "UFOslava's DCM Lift Control");
 
             //update block records
@@ -286,7 +319,8 @@ namespace IngameScript {
         private List<String> Warnings = new List<string>();
         private List<String> Errors = new List<string>();
         private string Prefix = "UFOslava's DCM Lift Control";
-        private int Iteration = 0;
+        private int Iteration = 0;//Log engine print iteration counter, for alive indicator
+        private readonly string[] RunIndicatorStrings = new string[4] { "/", "--", "\\", "|" };  
         public int Warning = 1;
         public int Error = 2;
 
@@ -314,24 +348,8 @@ namespace IngameScript {
         public void Add(string Content) { Messages.Add(Content); }
 
         private string RunIndicator() {
-            string Indicator = "/";
-            Iteration = ++Iteration % 4;
-            switch (Iteration) {
-                case 1:
-                    Indicator = "/";
-                    break;
-                case 2:
-                    Indicator = "--";
-                    break;
-                case 3:
-                    Indicator = @"\";
-                    break;
-                default:
-                    Indicator = "|";
-                    break;
-            }
-
-            return " " + Indicator;
+            Iteration = Iteration % 4;
+            return " " + RunIndicatorStrings[Iteration++];
         }
 
         public void Print(List<IMyTextSurface> LogScreens) {
@@ -343,18 +361,24 @@ namespace IngameScript {
 
             Messages = new List<string>(); //reset lists
 
-            Output += "\nWarnings:\n";
-            foreach (string Line in Warnings) {
-                Output += Line + "\n";
+            if (Warnings.Count > 0)
+            {
+                Output += "\nWarnings:\n";
+                foreach (string Line in Warnings) {
+                    Output += Line + "\n";
+                }
             }
-
+            
             Warnings = new List<string>();
 
-            Output += "\nErrors:\n";
-            foreach (string Line in Errors) {
-                Output += Line + "\n";
+            if (Errors.Count > 0)
+            {
+                Output += "\nErrors:\n";
+                foreach (string Line in Errors) {
+                    Output += Line + "\n";
+                }
             }
-
+            
             Errors = new List<string>();
 
             if (LogScreens.Count <= 0) {
@@ -365,8 +389,6 @@ namespace IngameScript {
                 try
                 {
                     Screen.ContentType = ContentType.TEXT_AND_IMAGE;
-                    _program.Echo("Screen: " + Screen.Name);
-
                     Screen.WriteText(Output);
                 } catch {
                     _program.Echo(Screen.Name + " is not a valid screen.");
