@@ -7,6 +7,8 @@ using System.Collections;
 using System.Linq;
 using System.Text;
 using System;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using Sandbox.Game.Entities.Blocks;
 using Sandbox.ModAPI;
 using VRage.Collections;
@@ -33,23 +35,28 @@ namespace IngameScript {
         // https://github.com/malware-dev/MDK-SE/wiki/Quick-Introduction-to-Space-Engineers-Ingame-Scripts
         //
         // to learn more about ingame scripts.
-        public List<IMyTextSurface> OutputLcdList = new List<IMyTextSurface>();
+        //
+        //Blocks used in the script
+        public List<IMyTextSurface> LCD = new List<IMyTextSurface>();
         public List<IMyLandingGear> BottomLandingGearsList = new List<IMyLandingGear>();
         public List<IMyLandingGear> TopLandingGearsList = new List<IMyLandingGear>();
-        public List<IMyShipConnector> TopConnector = new List<IMyShipConnector>();
-        public List<IMyShipConnector> BottomConnector = new List<IMyShipConnector>();
-        public List<IMyProgrammableBlock> CruiseControlProgrammableBlock = new List<IMyProgrammableBlock>();
-        public List<IMySensorBlock> TopSensorBlock = new List<IMySensorBlock>();
-        public List<IMySensorBlock> BottomSensorBlock = new List<IMySensorBlock>();
-        public List<IMySensorBlock> PeopleSensorBlock = new List<IMySensorBlock>();
+        public List<IMyShipConnector> TConn = new List<IMyShipConnector>();
+        public List<IMyShipConnector> BConn = new List<IMyShipConnector>();
+        public List<IMyProgrammableBlock> CCPB = new List<IMyProgrammableBlock>();
+        public List<IMySensorBlock> TSens = new List<IMySensorBlock>();
+        public List<IMySensorBlock> BSens = new List<IMySensorBlock>();
+        public List<IMySensorBlock> PSens = new List<IMySensorBlock>();
+
+        public bool RescanBlocksSuccess = false; //Script indicator that all essential blocks are found.
+
         public static List<IMyTerminalBlock> TerminalBlockList = new List<IMyTerminalBlock>(); //declare an empty list of TerminalBlocks for later use in searches.
         public static List<IMyTerminalBlock> TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>(); // T:
-        public Dictionary<string, string> SettingsDictionary = new Dictionary<string, string>() {{"Output LCD Name", "T:Status LCD"}, {"Top Floor Connector", "T:Top Connector"}, {"Bottom Floor Connector", "T:Bottom Connector"}, {"Cruise Control PB", "T:Cruise Control"}, {"Top Sensor", "T:Top Sensor"}, {"Bottom Sensor", "T:Bottom Sensor"}, {"Passengers Sensor","T:People Sensor" } };
+        public Dictionary<string, string> SettingsDictionary = new Dictionary<string, string>() {{"Output LCD", "T:Status LCD"}, {"Top Floor Connector", "T:Top Connector"}, {"Bottom Floor Connector", "T:Bottom Connector"}, {"Cruise Control PB", "T:Cruise Control"}, {"Top Sensor", "T:Top Sensor"}, {"Bottom Sensor", "T:Bottom Sensor"}, {"Passengers Sensor", "T:People Sensor"}};
         public LogEngine Log;
-        public int Iteration = 0;//Counts script iterations for unfrequent task schedling and task load distribution.
-        public int IterativeMultiplier = 1;//Compensates for script execution speed
+        public int Iteration = 0; //Counts script iterations for unfrequent task schedling and task load distribution.
+        public int IterativeMultiplier = 1; //Compensates for script execution speed
 
-        public List<IMyTerminalBlock> GetBlocksByPattern(string Pattern) { //Get AutoLCD2 type pattern, get back requested blocks, from current grids or otherwise.
+        public List<IMyTerminalBlock> GetAnyBlocksByPattern(string Pattern) { //Get AutoLCD2 type pattern, get back requested blocks, from current grids or otherwise.
             if (Pattern == null) {
                 return TerminalBlockList; //return all on empty patern
             }
@@ -112,11 +119,9 @@ namespace IngameScript {
         public bool FilterThis(IMyTerminalBlock block) { return block.CubeGrid == Me.CubeGrid; }
 
         void RescanBlocks() {
-            IMyTerminalBlock tempTerminalBlock;
-
             SettingsDictionary = ParseCustomData(Me, SettingsDictionary);
 
-            TerminalBlockList = new List<IMyTerminalBlock>();//reset Block lists
+            TerminalBlockList = new List<IMyTerminalBlock>(); //reset Block lists
             TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>();
 
             GridTerminalSystem.GetBlocksOfType<IMyTerminalBlock>(TerminalBlockList); //Acquire all "Smart" blocks
@@ -126,53 +131,52 @@ namespace IngameScript {
                     TerminalBlockListCurrentGrid.Add(Block); //Get Blocks of current Grid.
             }
 
-            try
-            {
+            RescanBlocksSuccess = true; //preset the assumption that blocks are found, then deny if missing.
+            try {
                 //Find specific Blocks
-                TopConnector = GetBlocksByPattern(SettingsDictionary["Top Floor Connector"]).Cast<IMyShipConnector>().ToList();
-                if (TopConnector.Count <= 0)
-                {
-                    Log.Add("Top Floor Connector not found!",Log.Error);
-                }
-                BottomConnector = GetBlocksByPattern(SettingsDictionary["Bottom Floor Connector"]).Cast<IMyShipConnector>().ToList();
-                if (BottomConnector.Count <= 0)
-                {
-                    Log.Add("Bottom Floor Connector not found!", Log.Error);
-                }
-                //Log.Add("Bottom Conector: " + BottomConnector.CustomName);
-                CruiseControlProgrammableBlock = GetBlocksByPattern(SettingsDictionary["Cruise Control PB"]).Cast<IMyProgrammableBlock>().ToList();
-                if (CruiseControlProgrammableBlock.Count <= 0)
-                {
-                    Log.Add("Cruise Control PB not found!", Log.Error);
-                }
-                //TODO add te rest of the validations
+                TConn = GetSpecificTypeBlocksByPattern<IMyShipConnector>("Top Floor Connector");
+                BConn = GetSpecificTypeBlocksByPattern<IMyShipConnector>("Bottom Floor Connector");
+                CCPB = GetSpecificTypeBlocksByPattern<IMyProgrammableBlock>("Cruise Control PB");
+                TSens = GetSpecificTypeBlocksByPattern<IMySensorBlock>("Top Sensor");
+                BSens = GetSpecificTypeBlocksByPattern<IMySensorBlock>("Bottom Sensor");
+                PSens = GetSpecificTypeBlocksByPattern<IMySensorBlock>("Passengers Sensor");
+                LCD = GetTextSurfaces("Output LCD"); //Output screens
+            } catch (Exception e) {
+                Log.Add(e.Message + "/n(in Blocks lookup)", Log.Error);
+                RescanBlocksSuccess = false;
+            }
 
-                TopSensorBlock = GetBlocksByPattern(SettingsDictionary["Top Sensor"]).Cast<IMySensorBlock>().ToList();
-                //Log.Add("Top Sensor: " + TopSensorBlock.CustomName);
-                BottomSensorBlock = GetBlocksByPattern(SettingsDictionary["Bottom Sensor"]).Cast<IMySensorBlock>().ToList();
-                PeopleSensorBlock = GetBlocksByPattern(SettingsDictionary["Passengers Sensor"]).Cast<IMySensorBlock>().ToList();
-                //Log.Add("Bottom Sensor: " + BottomSensorBlock.CustomName);
-                //TODO scan landing gears by orientation
-                //Output screens
-                OutputLcdList = GetTextSurfaces("Output LCD Name");
+            if (RescanBlocksSuccess) {
+                Log.Add("Blocks rescanned success.");
+            } else {
+                Log.Add("Blocks rescan failed!");
             }
-            catch (Exception e) {
-                Log.Add(e.Message + "\n(in Blocks lookup)", Log.Error);
+        }
+
+        private List<T> GetSpecificTypeBlocksByPattern<T>(string dicIndex) where T : IMyTerminalBlock {
+            //Log.Add("Pattern search started/nlooking for" + dicIndex + "/nof type" + typeof(T));
+            List<T> Temp = GetAnyBlocksByPattern(SettingsDictionary[dicIndex]).Where(block => block is T).Cast<T>().ToList();
+            //List<T> Temp = GetAnyBlocksByPattern(SettingsDictionary[dicIndex]).Where(block => block.ToString() == typeof(T).ToString()).Cast<T>().ToList();
+            //List<T> Temp = GetAnyBlocksByPattern(SettingsDictionary[dicIndex]).Where(block => typeof(T).ToString().Split('.').Last().Contains(block.GetType().ToString().Split('.').Last())).Cast<T>().ToList();
+            if (Temp.Count <= 0) {
+                Log.Add(dicIndex + " not found!", Log.Error);
+                RescanBlocksSuccess = false;
             }
-            Log.Add("Blocks rescanned");
+
+            return Temp;
         }
 
         public List<IMyTextSurface> GetTextSurfaces(string pattern) {
-            List<IMyTerminalBlock> OutputBlocks = GetBlocksByPattern(SettingsDictionary[pattern]);
+            List<IMyTerminalBlock> OutputBlocks = GetAnyBlocksByPattern(SettingsDictionary[pattern]);
             List<IMyTextSurface> OutputList = new List<IMyTextSurface>();
             foreach (IMyTerminalBlock block in OutputBlocks) {
                 if (block == null) {
                     continue;
                 }
 
-                IMyTextSurfaceProvider provider = block as IMyTextSurfaceProvider;
-                if (provider != null) {
-                    if (provider.GetSurface(0) != null) {
+                var provider = block as IMyTextSurfaceProvider;
+                if (provider != null) {//is a valid screen provider
+                    if (provider is IMyTextSurfaceProvider) {//is a valid screen (cryochamber is a provider for some reason, has no screens)
                         try {
                             OutputList.Add(provider.GetSurface(0));
                         } catch (Exception e) {
@@ -184,7 +188,7 @@ namespace IngameScript {
                     continue;
                 }
 
-                if (block is IMyTextSurface) {
+                if (block.GetType() == typeof(IMyTextSurface)) {
                     OutputList.Add((IMyTextSurface) block);
                 }
             }
@@ -229,36 +233,31 @@ namespace IngameScript {
             // 
             // The method itself is required, but the arguments above
             // can be removed if not needed.
-            Log.Add("Update source: " + updateSource);
-            Log.Add("Current Iteration: " + Iteration + "/" + 4 * IterativeMultiplier);
-            if (argument.Length > 0)
-            {
+            
+            if (argument.Length > 0) {
                 Log.Add("Argument: " + argument);
             } else {
                 Log.Add("No Argument.");
             }
+            Log.Add("/n");
+
             switch (updateSource) {
-               
                 case UpdateType.None:
                     break;
-                case UpdateType.Terminal://Script call trough terminal window
-                    //break;
-                case UpdateType.Trigger://Script call
-                    if (argument.ToLower().Contains("set100"))
-                    {
+                case UpdateType.Terminal: //Script call trough terminal window
+                //break;
+                case UpdateType.Trigger: //Script call
+                    if (argument.ToLower().Contains("set100")) {
                         Runtime.UpdateFrequency = UpdateFrequency.Update100;
                         break;
-                    }
-                    else if (argument.ToLower().Contains("set10"))
-                    {
+                    } else if (argument.ToLower().Contains("set10")) {
                         Runtime.UpdateFrequency = UpdateFrequency.Update10;
                         break;
-                    }
-                    else if (argument.ToLower().Contains("set1"))
-                    {
+                    } else if (argument.ToLower().Contains("set1")) {
                         Runtime.UpdateFrequency = UpdateFrequency.Update1;
                         break;
                     }
+
                     break;
                 case UpdateType.Antenna:
                     break;
@@ -268,28 +267,35 @@ namespace IngameScript {
                     break;
                 case UpdateType.Update1:
                     IterativeMultiplier = 100;
-                    goto Update; 
+                    goto Update;
                 case UpdateType.Update10:
                     IterativeMultiplier = 10;
                     goto Update;
                 case UpdateType.Update100:
                     IterativeMultiplier = 1;
-                    Update://"goto" landing
-                    Iteration = ++Iteration % (4*IterativeMultiplier);//Adjust by amount of idle tasks
+                    Update: //"goto" landing
+                    
                     switch (Iteration) {
-                        case 0://rescan blocks
+                        case 0: //rescan blocks
                             RescanBlocks();
+                            Iteration = RescanBlocksSuccess ? Iteration : 3;
                             break;
                         default:
+                            Log.Add("NOP.");
                             break;
                     }
+
                     break;
                 case UpdateType.Once:
                     break;
                 case UpdateType.IGC:
                     break;
             }
-            Log.Print(OutputLcdList);
+
+            Iteration = ++Iteration % (4 * IterativeMultiplier); //Adjust by amount of idle tasks
+            Log.Add("Update source: " + updateSource);
+            Log.Add("Current Iteration: " + (Iteration + 1) + "/" + 4 * IterativeMultiplier);
+            Log.Print(LCD);
         }
 
 
@@ -308,7 +314,6 @@ namespace IngameScript {
             Log = new LogEngine(this, "UFOslava's DCM Lift Control");
 
             //update block records
-            Dictionary<string, string> customData = ParseCustomData(Me, SettingsDictionary); //Scan my Custom Data
             RescanBlocks();
         }
     }
@@ -319,8 +324,8 @@ namespace IngameScript {
         private List<String> Warnings = new List<string>();
         private List<String> Errors = new List<string>();
         private string Prefix = "UFOslava's DCM Lift Control";
-        private int Iteration = 0;//Log engine print iteration counter, for alive indicator
-        private readonly string[] RunIndicatorStrings = new string[4] { "/", "--", "\\", "|" };  
+        private int Iteration = 0; //Log engine print iteration counter, for alive indicator
+        private readonly string[] RunIndicatorStrings = new string[4] {"/", "--", "\\", "|"};
         public int Warning = 1;
         public int Error = 2;
 
@@ -361,24 +366,22 @@ namespace IngameScript {
 
             Messages = new List<string>(); //reset lists
 
-            if (Warnings.Count > 0)
-            {
+            if (Warnings.Count > 0) {
                 Output += "\nWarnings:\n";
                 foreach (string Line in Warnings) {
                     Output += Line + "\n";
                 }
             }
-            
+
             Warnings = new List<string>();
 
-            if (Errors.Count > 0)
-            {
+            if (Errors.Count > 0) {
                 Output += "\nErrors:\n";
                 foreach (string Line in Errors) {
                     Output += Line + "\n";
                 }
             }
-            
+
             Errors = new List<string>();
 
             if (LogScreens.Count <= 0) {
@@ -386,8 +389,7 @@ namespace IngameScript {
             }
 
             foreach (IMyTextSurface Screen in LogScreens) {
-                try
-                {
+                try {
                     Screen.ContentType = ContentType.TEXT_AND_IMAGE;
                     Screen.WriteText(Output);
                 } catch {
