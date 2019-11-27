@@ -20,6 +20,7 @@ using VRage.Game.ObjectBuilders.Definitions;
 using VRage.Game;
 using VRage;
 using VRageMath;
+using IMyBatteryBlock = Sandbox.ModAPI.Ingame.IMyBatteryBlock;
 using IMyCryoChamber = Sandbox.ModAPI.Ingame.IMyCryoChamber;
 using IMyDoor = Sandbox.ModAPI.Ingame.IMyDoor;
 using IMyProgrammableBlock = Sandbox.ModAPI.Ingame.IMyProgrammableBlock;
@@ -28,6 +29,7 @@ using IMyShipConnector = Sandbox.ModAPI.Ingame.IMyShipConnector;
 using IMyTerminalBlock = Sandbox.ModAPI.Ingame.IMyTerminalBlock;
 using IMyTextSurface = Sandbox.ModAPI.Ingame.IMyTextSurface;
 using IMyTextSurfaceProvider = Sandbox.ModAPI.Ingame.IMyTextSurfaceProvider;
+using IMyThrust = Sandbox.ModAPI.Ingame.IMyThrust;
 
 
 namespace IngameScript {
@@ -48,6 +50,8 @@ namespace IngameScript {
         public IMySensorBlock PSens; //Cabin Sensor (People)
         public List<IMyDoor> TDoor = new List<IMyDoor>(); //Top Doors
         public List<IMyDoor> BDoor = new List<IMyDoor>(); //Bottom Doors
+        public List<IMyBatteryBlock> Batt = new List<IMyBatteryBlock>(); //Batteries
+        public List<IMyThrust> Thr = new List<IMyThrust>(); //Thrusters
 
         public static List<IMyTerminalBlock> TerminalBlockList = new List<IMyTerminalBlock>(); //declare an empty list of TerminalBlocks for later use in searches.
         public static List<IMyTerminalBlock> TerminalBlockListCurrentGrid = new List<IMyTerminalBlock>(); // "T:"
@@ -89,7 +93,7 @@ namespace IngameScript {
             if (Pattern.StartsWith("T:")) { //Return current grid Blocks only, by name.
                 Pattern = Pattern.Substring(2); //Update pattern with T: removed.
                 foreach (IMyTerminalBlock Block in TerminalBlockListCurrentGrid) {
-                    if (Block.CustomName.Contains(Pattern))
+                    if (Block.CustomName.Contains(Pattern) || Pattern == "*")
                         ReturnList.Add(Block);
                 }
 
@@ -102,7 +106,7 @@ namespace IngameScript {
             }
 
             foreach (IMyTerminalBlock Block in TerminalBlockList) {
-                if (Block.CustomName.Contains(Pattern))
+                if (Block.CustomName.Contains(Pattern) || Pattern == "*")
                     ReturnList.Add(Block);
             }
 
@@ -168,6 +172,8 @@ namespace IngameScript {
                 TDoor = GetSpecificTypeBlocksByPattern<IMyDoor>("Top Floor Doors");
                 BDoor = GetSpecificTypeBlocksByPattern<IMyDoor>("Bottom Floor Doors");
                 LG = GetSpecificTypeBlocksByPattern<IMyLandingGear>("Landing Gear");
+                
+
             } catch (Exception e) {
                 Log.Add(e.Message + "\n(in Blocks lookup)", Log.Error);
                 RescanBlocksSuccess = false;
@@ -178,21 +184,27 @@ namespace IngameScript {
             } else {
                 Log.Add("Blocks rescan failed!");
             }
+
+            Batt = GetSpecificTypeBlocksByPattern<IMyBatteryBlock>("*");
+            Thr = GetSpecificTypeBlocksByPattern<IMyThrust>("*");
         }
 
         private List<T> GetSpecificTypeBlocksByPattern<T>(string dicIndex) where T : IMyTerminalBlock {
             //Log.Add("Pattern search started/nlooking for" + dicIndex + "/nof type" + typeof(T));
             List<T> Temp = new List<T>();
-            if (SettingsDictionary[dicIndex].Length > 0) {
-                Temp = GetAnyBlocksByPattern(SettingsDictionary[dicIndex]).Where(block => block is T).Cast<T>().ToList();
-                //List<T> Temp = GetAnyBlocksByPattern(SettingsDictionary[dicIndex]).Where(block => block.ToString() == typeof(T).ToString()).Cast<T>().ToList();
-                //List<T> Temp = GetAnyBlocksByPattern(SettingsDictionary[dicIndex]).Where(block => typeof(T).ToString().Split('.').Last().Contains(block.GetType().ToString().Split('.').Last())).Cast<T>().ToList();
-                if (Temp.Count <= 0) {
-                    Log.Add(dicIndex + " not found!", Log.Error);
-                    RescanBlocksSuccess = false;
+            try {
+                if (SettingsDictionary[dicIndex].Length > 0) {
+                    Temp = GetAnyBlocksByPattern(SettingsDictionary[dicIndex]).Where(block => block is T).Cast<T>().ToList();
+                    //List<T> Temp = GetAnyBlocksByPattern(SettingsDictionary[dicIndex]).Where(block => block.ToString() == typeof(T).ToString()).Cast<T>().ToList();
+                    //List<T> Temp = GetAnyBlocksByPattern(SettingsDictionary[dicIndex]).Where(block => typeof(T).ToString().Split('.').Last().Contains(block.GetType().ToString().Split('.').Last())).Cast<T>().ToList();
+                    if (Temp.Count <= 0) {
+                        Log.Add(dicIndex + " not found!", Log.Error);
+                        RescanBlocksSuccess = false;
+                    }
                 }
+            } catch (Exception e) {
+                    Temp = GetAnyBlocksByPattern(dicIndex).Where(block => block is T).Cast<T>().ToList();
             }
-
             return Temp;
         }
 
@@ -266,6 +278,7 @@ namespace IngameScript {
 
             if (argument.Length > 0) {
                 Log.Add("Argument: " + argument);
+                //CurState = argument;
             } else {
                 Log.Add("No Argument.");
             }
@@ -289,12 +302,14 @@ namespace IngameScript {
                     switch (argument.ToLower()) {
                         case "goup":
                             LiftIntent = "up";
+                            CurState = "PrepDep";
                             break;
                         case "go_down":
                         case "godown":
                         case "godwn":
                         case "godn":
                             LiftIntent = "down";
+                            CurState = "PrepDep";
                             break;
                     }
 
@@ -332,12 +347,17 @@ namespace IngameScript {
                     break;
             }
             Log.Add("Current state: " + CurState);
+            Log.Add("Current intent: " + LiftIntent);
             Log.Add("Det: " + PSens.CustomName + " - " + PSens.IsActive);
             
             //Main state machine
             switch (CurState) {
                 case "Unknown":
+                    Runtime.UpdateFrequency = UpdateFrequency.Update100;
                     CurState = "CrzUp";
+                    if (LastState != "CrzUp") {
+                        //engines, CC, etc
+                    }
                     foreach (var gear in LG) {
                         if (gear.LockMode != LandingGearMode.Unlocked) {
                             CurState = "Unknown";
@@ -363,6 +383,8 @@ namespace IngameScript {
 
                     break;
                 case "Idle":
+                    Runtime.UpdateFrequency = UpdateFrequency.Update100;
+
                     foreach (var gear in LG)
                         gear.Lock();
                     foreach (var Conn in TConn)
@@ -371,28 +393,99 @@ namespace IngameScript {
                         Conn.Connect();
                     if (PSens.IsActive) {
                         if (LiftIntent == "up") {
-                            foreach (var door in TDoor) {
-                                door.OpenDoor();
-                            }
+                            foreach (var door in TDoor) 
+                                if (door.Status != DoorStatus.Open) 
+                                    door.OpenDoor();
                         } else if (LiftIntent == "down") {
-                            foreach (var door in BDoor) {
-                                door.OpenDoor();
-                            }
+                            foreach (var door in BDoor) 
+                                if (door.Status != DoorStatus.Open)
+                                    door.OpenDoor();
                         }
-                        
                     } else {
                         foreach (var door in TDoor)
-                            door.CloseDoor();
+                            if (door.Status != DoorStatus.Closed)
+                                door.CloseDoor();
                         foreach (var door in BDoor)
-                        {
-                            door.CloseDoor();
-                        }
+                            if (door.Status != DoorStatus.Closed)
+                                door.CloseDoor();
                     }
                     break;
+
+                case "PrepDep": //Prepare for Departure
+                    bool doorsClosed = true;
+                    foreach (var batt in Batt) {
+                        batt.ChargeMode = ChargeMode.Auto;
+                    }
+
+                    foreach (var thr in Thr) {
+                        thr.Enabled = true;
+                    }
+
+                    foreach (var door in TDoor) {
+                        door.CloseDoor();
+                        doorsClosed &= (door.Status == DoorStatus.Closed);
+                    }
+
+                    foreach (var door in BDoor) {
+                        door.CloseDoor();
+                        doorsClosed &= (door.Status == DoorStatus.Closed);
+                    }
+
+                    if (doorsClosed) {
+                        CurState = (LiftIntent == "up") ? "CrzUp" : "CrzDwn";
+                    }
+                    break;
+
+                case "CrzDwn": //Cruise downwards
+                        if (LastState != "CrzDwn")
+                        {
+                            //TODO engines, CC, Update freq 1, etc
+                        }
+
+                        break;
+                case "AppDwn": //Approach bottom floor
+                case "PrkDwn": //Parking at bottom floor
+                    Runtime.UpdateFrequency = UpdateFrequency.Update10;
+                    //TODO CC 2~3
+                    bool LG_Ready = false;
+                    bool Con_Ready = false;
+                    foreach (var gear in LG) {
+                        if (gear.LockMode == LandingGearMode.ReadyToLock) {
+                            LG_Ready = true;
+                            break;
+                        }
+                    }
+
+                    foreach (var Con in BConn) {
+                        if (Con.Status == MyShipConnectorStatus.Connectable) {
+                            //CurState = "PrkDwn";
+                            Con_Ready = true;
+                            break;
+                        }
+                    }
+
+                    if (LG_Ready && Con_Ready) {
+                        foreach (var gear in LG)
+                            gear.Lock();
+                        foreach (var Con in BConn)
+                            Con.Connect();
+                        //TODO turn engines off, turn off CC, batteries to recharge.
+                        CurState = "Idle";
+                    }
+
+                    break;
+
+                case "CrzUp": //Cruise upwards
+                    break;
+                case "AppUp": //Approach top floor
+                case "PrkUp": //Parking at top floor
+                    break;
                 default:
+                    Log.Add("Unknown state: " + CurState,Log.Error);
                     break;
             }
 
+            LastState = CurState;
             //Output
             Iteration = ++Iteration % (4 * IterativeMultiplier); //Adjust by amount of idle tasks
             Log.Add("Update source: " + updateSource);
