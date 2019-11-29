@@ -23,6 +23,7 @@ using VRageMath;
 using IMyBatteryBlock = Sandbox.ModAPI.Ingame.IMyBatteryBlock;
 using IMyCryoChamber = Sandbox.ModAPI.Ingame.IMyCryoChamber;
 using IMyDoor = Sandbox.ModAPI.Ingame.IMyDoor;
+using IMyFunctionalBlock = Sandbox.ModAPI.Ingame.IMyFunctionalBlock;
 using IMyProgrammableBlock = Sandbox.ModAPI.Ingame.IMyProgrammableBlock;
 using IMySensorBlock = Sandbox.ModAPI.Ingame.IMySensorBlock;
 using IMyShipConnector = Sandbox.ModAPI.Ingame.IMyShipConnector;
@@ -172,8 +173,6 @@ namespace IngameScript {
                 TDoor = GetSpecificTypeBlocksByPattern<IMyDoor>("Top Floor Doors");
                 BDoor = GetSpecificTypeBlocksByPattern<IMyDoor>("Bottom Floor Doors");
                 LG = GetSpecificTypeBlocksByPattern<IMyLandingGear>("Landing Gear");
-                
-
             } catch (Exception e) {
                 Log.Add(e.Message + "\n(in Blocks lookup)", Log.Error);
                 RescanBlocksSuccess = false;
@@ -203,8 +202,9 @@ namespace IngameScript {
                     }
                 }
             } catch (Exception e) {
-                    Temp = GetAnyBlocksByPattern(dicIndex).Where(block => block is T).Cast<T>().ToList();
+                Temp = GetAnyBlocksByPattern(dicIndex).Where(block => block is T).Cast<T>().ToList();
             }
+
             return Temp;
         }
 
@@ -256,6 +256,14 @@ namespace IngameScript {
 //            }
         }
 
+        public void EnableBlockList<T>(List<T> BlockList) where T: IMyFunctionalBlock {
+            foreach (var block in BlockList) block.Enabled = true;
+        }
+
+        public void EnableBlockList<T>(List<T> BlockList, bool State) where T : IMyFunctionalBlock {
+            foreach (var block in BlockList) block.Enabled = State;
+        }
+
         public void Save() {
             // Called when the program needs to save its state. Use
             // this method to save your state to the Storage field
@@ -263,6 +271,11 @@ namespace IngameScript {
             // 
             // This method is optional and can be removed if not
             // needed.
+        }
+
+        private void ConfigBlocks() {
+            EnableBlockList(Thr);
+            EnableBlockList(Batt);
         }
 
         public void Main(string argument, UpdateType updateSource) {
@@ -335,6 +348,9 @@ namespace IngameScript {
                             RescanBlocks();
                             Iteration = RescanBlocksSuccess ? Iteration : 3;
                             break;
+                        case 1:
+                            ConfigBlocks();
+                            break;
                         default:
                             Log.Add("NOP.");
                             break;
@@ -346,18 +362,22 @@ namespace IngameScript {
                 case UpdateType.IGC:
                     break;
             }
+
             Log.Add("Current state: " + CurState);
-            Log.Add("Current intent: " + LiftIntent);
+            Log.Add("Current intent: " + LiftIntent
+            );
             Log.Add("Det: " + PSens.CustomName + " - " + PSens.IsActive);
-            
+
             //Main state machine
             switch (CurState) {
                 case "Unknown":
                     Runtime.UpdateFrequency = UpdateFrequency.Update100;
                     CurState = "CrzUp";
                     if (LastState != "CrzUp") {
-                        //engines, CC, etc
+                        //CC, etc
+                        EnableBlockList(Thr);
                     }
+
                     foreach (var gear in LG) {
                         if (gear.LockMode != LandingGearMode.Unlocked) {
                             CurState = "Unknown";
@@ -393,11 +413,11 @@ namespace IngameScript {
                         Conn.Connect();
                     if (PSens.IsActive) {
                         if (LiftIntent == "up") {
-                            foreach (var door in TDoor) 
-                                if (door.Status != DoorStatus.Open) 
+                            foreach (var door in TDoor)
+                                if (door.Status != DoorStatus.Open)
                                     door.OpenDoor();
                         } else if (LiftIntent == "down") {
-                            foreach (var door in BDoor) 
+                            foreach (var door in BDoor)
                                 if (door.Status != DoorStatus.Open)
                                     door.OpenDoor();
                         }
@@ -409,24 +429,32 @@ namespace IngameScript {
                             if (door.Status != DoorStatus.Closed)
                                 door.CloseDoor();
                     }
+
                     break;
 
                 case "PrepDep": //Prepare for Departure
                     bool doorsClosed = true;
                     foreach (var batt in Batt) {
+                        if (LastState != CurState)
+                            batt.Enabled = true;
                         batt.ChargeMode = ChargeMode.Auto;
                     }
 
                     foreach (var thr in Thr) {
-                        thr.Enabled = true;
+                        if (LastState != CurState)
+                            thr.Enabled = true;
                     }
 
                     foreach (var door in TDoor) {
+                        if (LastState != CurState)
+                            door.Enabled = true;
                         door.CloseDoor();
                         doorsClosed &= (door.Status == DoorStatus.Closed);
                     }
 
                     foreach (var door in BDoor) {
+                        if (LastState != CurState)
+                            door.Enabled = true;
                         door.CloseDoor();
                         doorsClosed &= (door.Status == DoorStatus.Closed);
                     }
@@ -434,15 +462,22 @@ namespace IngameScript {
                     if (doorsClosed) {
                         CurState = (LiftIntent == "up") ? "CrzUp" : "CrzDwn";
                     }
+
                     break;
 
                 case "CrzDwn": //Cruise downwards
-                        if (LastState != "CrzDwn")
-                        {
-                            //TODO engines, CC, Update freq 1, etc
-                        }
+                    if (LastState != CurState) {
+                        Runtime.UpdateFrequency = UpdateFrequency.Update1;
 
-                        break;
+                        foreach (var thr in Thr)
+                            thr.Enabled = true;
+                        foreach (var batt in Batt)
+                            batt.Enabled = true;
+
+                        //TODO engines, CC, Update , etc
+                    }
+
+                    break;
                 case "AppDwn": //Approach bottom floor
                 case "PrkDwn": //Parking at bottom floor
                     Runtime.UpdateFrequency = UpdateFrequency.Update10;
@@ -481,7 +516,7 @@ namespace IngameScript {
                 case "PrkUp": //Parking at top floor
                     break;
                 default:
-                    Log.Add("Unknown state: " + CurState,Log.Error);
+                    Log.Add("Unknown state: " + CurState, Log.Error);
                     break;
             }
 
