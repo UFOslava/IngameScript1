@@ -46,9 +46,9 @@ namespace IngameScript {
         public List<IMyShipConnector> TConn = new List<IMyShipConnector>(); //Top Connector
         public List<IMyShipConnector> BConn = new List<IMyShipConnector>(); //Bottom Connector
         public List<IMyProgrammableBlock> CCPB = new List<IMyProgrammableBlock>(); //Cruise control Programming Block
-        public IMySensorBlock TSens; //Top facing sensor
-        public IMySensorBlock BSens; //Bottom facing sensor
-        public IMySensorBlock PSens; //Cabin Sensor (People)
+        public List<IMySensorBlock> TSens; //Top facing sensor
+        public List<IMySensorBlock> BSens; //Bottom facing sensor
+        public List<IMySensorBlock> PSens; //Cabin Sensor (People)
         public List<IMyDoor> TDoor = new List<IMyDoor>(); //Top Doors
         public List<IMyDoor> BDoor = new List<IMyDoor>(); //Bottom Doors
         public List<IMyBatteryBlock> Batt = new List<IMyBatteryBlock>(); //Batteries
@@ -166,9 +166,9 @@ namespace IngameScript {
                 TConn = GetSpecificTypeBlocksByPattern<IMyShipConnector>("Top Floor Connector");
                 BConn = GetSpecificTypeBlocksByPattern<IMyShipConnector>("Bottom Floor Connector");
                 CCPB = GetSpecificTypeBlocksByPattern<IMyProgrammableBlock>("Cruise Control PB");
-                TSens = GetSpecificTypeBlocksByPattern<IMySensorBlock>("Top Sensor").First();
-                BSens = GetSpecificTypeBlocksByPattern<IMySensorBlock>("Bottom Sensor").First();
-                PSens = GetSpecificTypeBlocksByPattern<IMySensorBlock>("Passengers Sensor").First();
+                TSens = GetSpecificTypeBlocksByPattern<IMySensorBlock>("Top Sensor");
+                BSens = GetSpecificTypeBlocksByPattern<IMySensorBlock>("Bottom Sensor");
+                PSens = GetSpecificTypeBlocksByPattern<IMySensorBlock>("Passengers Sensor");
                 LCD = GetTextSurfaces("Output LCD"); //Output screens
                 TDoor = GetSpecificTypeBlocksByPattern<IMyDoor>("Top Floor Doors");
                 BDoor = GetSpecificTypeBlocksByPattern<IMyDoor>("Bottom Floor Doors");
@@ -273,9 +273,24 @@ namespace IngameScript {
             // needed.
         }
 
-        private void ConfigBlocks() {
-            EnableBlockList(Thr);
-            EnableBlockList(Batt);
+        private void ConfigBlocks() {//enable all relevant blocks
+            try {
+                EnableBlockList(Batt);
+                EnableBlockList(Thr);
+                EnableBlockList(LG);
+                EnableBlockList(TConn);
+                EnableBlockList(BConn);
+                EnableBlockList(CCPB);
+                EnableBlockList(TSens);
+                EnableBlockList(BSens);
+                EnableBlockList(PSens);
+                EnableBlockList(TDoor);
+                EnableBlockList(BDoor);
+                Log.Add("Blocks enabled.");
+            } catch (Exception e) {
+                Log.Add(e.Message, Log.Error);
+                Iteration--;
+            }
         }
 
         public void Main(string argument, UpdateType updateSource) {
@@ -366,7 +381,7 @@ namespace IngameScript {
             Log.Add("Current state: " + CurState);
             Log.Add("Current intent: " + LiftIntent
             );
-            Log.Add("Det: " + PSens.CustomName + " - " + PSens.IsActive);
+            Log.Add("Det: " + PSens.First().CustomName + " - " + PSens.First().IsActive);
 
             //Main state machine
             switch (CurState) {
@@ -404,14 +419,20 @@ namespace IngameScript {
                     break;
                 case "Idle":
                     Runtime.UpdateFrequency = UpdateFrequency.Update100;
-
+                    if (LastState != CurState) {
+                        EnableBlockList(Batt);
+                        EnableBlockList(BDoor);
+                        EnableBlockList(TDoor);
+                        EnableBlockList(PSens);
+                    }
+                    EnableBlockList(Batt);
                     foreach (var gear in LG)
                         gear.Lock();
                     foreach (var Conn in TConn)
                         Conn.Connect();
                     foreach (var Conn in BConn)
                         Conn.Connect();
-                    if (PSens.IsActive) {
+                    if (PSens.First().IsActive) {
                         if (LiftIntent == "up") {
                             foreach (var door in TDoor)
                                 if (door.Status != DoorStatus.Open)
@@ -469,10 +490,11 @@ namespace IngameScript {
                     if (LastState != CurState) {
                         Runtime.UpdateFrequency = UpdateFrequency.Update1;
 
-                        foreach (var thr in Thr)
-                            thr.Enabled = true;
-                        foreach (var batt in Batt)
-                            batt.Enabled = true;
+                        EnableBlockList(Thr);
+                        EnableBlockList(Batt);
+                        foreach (var batteryBlock in Batt) {
+                            batteryBlock.ChargeMode = ChargeMode.Auto;
+                        }
 
                         //TODO engines, CC, Update , etc
                     }
