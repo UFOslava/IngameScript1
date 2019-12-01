@@ -256,12 +256,14 @@ namespace IngameScript {
 //            }
         }
 
-        public void EnableBlockList<T>(List<T> BlockList) where T: IMyFunctionalBlock {
-            foreach (var block in BlockList) block.Enabled = true;
+        public void EnableBlockList<T>(List<T> BlockList) where T : IMyFunctionalBlock {
+            foreach (var block in BlockList)
+                block.Enabled = true;
         }
 
         public void EnableBlockList<T>(List<T> BlockList, bool State) where T : IMyFunctionalBlock {
-            foreach (var block in BlockList) block.Enabled = State;
+            foreach (var block in BlockList)
+                block.Enabled = State;
         }
 
         public void Save() {
@@ -273,7 +275,7 @@ namespace IngameScript {
             // needed.
         }
 
-        private void ConfigBlocks() {//enable all relevant blocks
+        private void ConfigBlocks() { //enable all relevant blocks
             try {
                 EnableBlockList(Batt);
                 EnableBlockList(Thr);
@@ -291,6 +293,50 @@ namespace IngameScript {
                 Log.Add(e.Message, Log.Error);
                 Iteration--;
             }
+        }
+
+        public bool SetApproachSensors<T>(List<T> Sensors, float Dist) where T : IMySensorBlock {
+            Dist = Math.Max(50f, Math.Min(1.5f, Dist));
+            try {
+                Sensors.FirstOrDefault().FrontExtend = Dist;
+                Sensors.FirstOrDefault().BackExtend = 1.5f;
+
+                Sensors.FirstOrDefault().ApplyAction("Detect Players_Off");
+                Sensors.FirstOrDefault().ApplyAction("Detect Floating Objects_Off");
+                Sensors.FirstOrDefault().ApplyAction("Detect Small Ships_On");
+                Sensors.FirstOrDefault().ApplyAction("Detect Large Ships_On");
+                Sensors.FirstOrDefault().ApplyAction("Detect Stations_On");
+                Sensors.FirstOrDefault().ApplyAction("Detect Asteroids_Off");
+
+                Sensors.FirstOrDefault().ApplyAction("Detect Owner_On");
+                Sensors.FirstOrDefault().ApplyAction("Detect Friendly_On");
+                Sensors.FirstOrDefault().ApplyAction("Detect Neutral_On");
+                Sensors.FirstOrDefault().ApplyAction("Detect Enemy_On");
+            } catch (Exception e) {
+                return false;
+            }
+
+            return true;
+        }
+
+        public bool SetPassengerSensors<T>(List<T> Sensors) where T : IMySensorBlock {
+            try {
+                Sensors.FirstOrDefault().ApplyAction("Detect Players_On");
+                Sensors.FirstOrDefault().ApplyAction("Detect Floating Objects_Off");
+                Sensors.FirstOrDefault().ApplyAction("Detect Small Ships_Off");
+                Sensors.FirstOrDefault().ApplyAction("Detect Large Ships_Off");
+                Sensors.FirstOrDefault().ApplyAction("Detect Stations_Off");
+                Sensors.FirstOrDefault().ApplyAction("Detect Asteroids_Off");
+
+                Sensors.FirstOrDefault().ApplyAction("Detect Owner_On");
+                Sensors.FirstOrDefault().ApplyAction("Detect Friendly_On");
+                Sensors.FirstOrDefault().ApplyAction("Detect Neutral_On");
+                Sensors.FirstOrDefault().ApplyAction("Detect Enemy_Off");
+            } catch (Exception e) {
+                return false;
+            }
+
+            return true;
         }
 
         public void Main(string argument, UpdateType updateSource) {
@@ -387,10 +433,21 @@ namespace IngameScript {
             switch (CurState) {
                 case "Unknown":
                     Runtime.UpdateFrequency = UpdateFrequency.Update100;
-                    CurState = "CrzUp";
-                    if (LastState != "CrzUp") {
-                        //CC, etc
-                        EnableBlockList(Thr);
+                    CurState = "PrepDep";
+                    LiftIntent = "up";
+
+                    //check sensors, go to nearest floor
+                    SetApproachSensors(TSens, 50);
+                    SetApproachSensors(BSens, 50);
+
+                    if (TSens.FirstOrDefault().IsActive) {
+                        CurState = "AppUp";
+                        LiftIntent = "up";
+                    }
+
+                    if (BSens.FirstOrDefault().IsActive) {
+                        CurState = "AppDwn";
+                        LiftIntent = "down";
                     }
 
                     foreach (var gear in LG) {
@@ -409,8 +466,8 @@ namespace IngameScript {
 
                     foreach (var Con in BConn) {
                         if (Con.Status != MyShipConnectorStatus.Unconnected) {
-                            //CurState = "PrkDwn";
-                            CurState = "Idle";
+                            CurState = "PrkDwn";
+                            //CurState = "Idle";
                             LiftIntent = "down";
                             break;
                         }
@@ -419,12 +476,13 @@ namespace IngameScript {
                     break;
                 case "Idle":
                     Runtime.UpdateFrequency = UpdateFrequency.Update100;
-                    if (LastState != CurState) {
+                    if (LastState != CurState) { //State running first time.
                         EnableBlockList(Batt);
                         EnableBlockList(BDoor);
                         EnableBlockList(TDoor);
                         EnableBlockList(PSens);
                     }
+
                     EnableBlockList(Batt);
                     foreach (var gear in LG)
                         gear.Lock();
@@ -454,21 +512,26 @@ namespace IngameScript {
                     break;
 
                 case "PrepDep": //Prepare for Departure
+                    Runtime.UpdateFrequency = UpdateFrequency.Update10;
+                    if (LastState != CurState) {
+                        EnableBlockList(Batt);
+                        EnableBlockList(Thr);
+                        EnableBlockList(TDoor);
+                        EnableBlockList(BDoor);
+                        EnableBlockList(CCPB);
+                        CCPB.FirstOrDefault()?.TryRun("cc_on"); // Turn on CC
+                        CCPB.FirstOrDefault()?.TryRun("axis_v"); //Set to vertical
+                        CCPB.FirstOrDefault()?.TryRun("setspeed 0"); //Hold in place in preparation for departure
+
+                        EnableBlockList(LiftIntent == "up" ? TSens : BSens); // :O
+                    }
+
                     bool doorsClosed = true;
                     foreach (var batt in Batt) {
-                        if (LastState != CurState)
-                            batt.Enabled = true;
                         batt.ChargeMode = ChargeMode.Auto;
                     }
 
-                    foreach (var thr in Thr) {
-                        if (LastState != CurState)
-                            thr.Enabled = true;
-                    }
-
                     foreach (var door in TDoor) {
-                        if (LastState != CurState)
-                            door.Enabled = true;
                         door.CloseDoor();
                         doorsClosed &= (door.Status == DoorStatus.Closed);
                     }
