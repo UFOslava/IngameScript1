@@ -71,6 +71,8 @@ namespace IngameScript {
             {"Top Floor Doors", "Top Floor"},
             {"Bottom Floor Doors", "Bottom Floor"},
             {"Landing Gear", "T:Landing Gear"},
+            {"Batteries", "T:*"},
+            {"Thrusters", "T:*"},
             {"Upward Cruise Speed [m/s]", "50"},
             {"Downward Cruise Speed [m/s]", "50"},
             {"Upward Approach Distance [1.5m~50m]", "50"},
@@ -200,6 +202,10 @@ namespace IngameScript {
                 EnableBlockList(BDoor);
                 LG = GetSpecificTypeBlocksByPattern<IMyLandingGear>("Landing Gear");
                 EnableBlockList(LG);
+                Batt = GetSpecificTypeBlocksByPattern<IMyBatteryBlock>("Batteries");
+                EnableBlockList(Batt);
+                Thr = GetSpecificTypeBlocksByPattern<IMyThrust>("Thrusters");
+                //EnableBlockList(Thr);
             } catch (Exception e) {
                 Log.Add(e.Message + "\n(in Blocks lookup)", Log.Error);
                 RescanBlocksSuccess = false;
@@ -211,8 +217,7 @@ namespace IngameScript {
                 Log.Add("Blocks rescan failed!");
             }
 
-            Batt = GetSpecificTypeBlocksByPattern<IMyBatteryBlock>("*");
-            Thr = GetSpecificTypeBlocksByPattern<IMyThrust>("*");
+            
         }
 
         private List<T> GetSpecificTypeBlocksByPattern<T>(string dicIndex) where T : IMyTerminalBlock {
@@ -323,10 +328,14 @@ namespace IngameScript {
         }
 
         public bool SetApproachSensors<T>(List<T> Sensors, float Dist) where T : IMySensorBlock {
-            Dist = Math.Max(50f, Math.Min(1.5f, Dist));
+            Dist = Math.Min(50f, Math.Max(1.5f, Dist));// 1.5~50
             try {
                 Sensors.First().FrontExtend = Dist;
-                Sensors.First().BackExtend = 1.5f;
+                Sensors.First().BackExtend = 2.5f;
+                Sensors.First().LeftExtend = 2.5f;
+                Sensors.First().RightExtend = 2.5f;
+                Sensors.First().TopExtend = 2.5f;
+                Sensors.First().BottomExtend = 2.5f;
 
                 Sensors.First().ApplyAction("Detect Players_Off");
                 Sensors.First().ApplyAction("Detect Floating Objects_Off");
@@ -442,7 +451,9 @@ namespace IngameScript {
             Log.Add("Current state: " + CurState);
             Log.Add("Current intent: " + LiftIntent
             );
-            Log.Add("Det: " + PSens.First().CustomName + " - " + PSens.First().IsActive);
+
+            float Dist = Math.Min(50f, Math.Max(1.5f, float.Parse(SettingsDictionary["Upward Approach Distance [1.5m~50m]"])));// 1.5~50
+            Log.Add("Sensor distance: " + Dist);
 
             //Main state machine
             CurStateTemp = CurState;
@@ -562,10 +573,12 @@ namespace IngameScript {
                             foreach (var door in TDoor) {
                                 door.OpenDoor();
                             }
-                        } else {
-                            foreach (var door in TDoor) {
+                        } else if (BConn.First().Status != MyShipConnectorStatus.Unconnected) {
+                            foreach (var door in BDoor) {
                                 door.OpenDoor();
                             }
+                        } else {
+                            //CurState = "Unknown";
                         }
 
                         doorsClosed = false; //Hold departure
@@ -611,12 +624,9 @@ namespace IngameScript {
                         SetApproachSensors(BSens, float.Parse(SettingsDictionary["Downward Approach Distance [1.5m~50m]"]));
                         SetPassengerSensors(PSens);
 
-                        foreach (var gear in LG)
-                            gear.Unlock();
-                        foreach (var conn in TConn)
-                            conn.Disconnect();
-                        foreach (var conn in BConn)
-                            conn.Disconnect();
+                        foreach (var gear in LG) gear.Unlock();
+                        foreach (var conn in TConn) conn.Disconnect();
+                        foreach (var conn in BConn) conn.Disconnect();
 
                         CCPB.First()?.TryRun("cc_on"); // Turn on CC
                         CCPB.First()?.TryRun("axis_v"); //Set to vertical
@@ -633,6 +643,7 @@ namespace IngameScript {
                     if (LiftIntent == "down" && BSens.First().IsActive) CurState = "Approach";
                     
                     break;
+
                 case "Approach": //Approach bottom floor
                     if (LastState != CurState) {
                         //TODO Adust sensors
@@ -657,6 +668,7 @@ namespace IngameScript {
 
                     CCPB.First()?.TryRun("setspeed " + (LiftIntent == "up" ? "" : "-") + SettingsDictionary[LiftIntent == "up" ? "Upward Approach Speed [m/s]" : "Downward Approach speed [m/s]"]); //Hold in place in preparation for departure
                     break;
+
                 case "Parking": //Parking at bottom floor
                     if (LastState != CurState) {
                         EnableBlockList(Thr);
@@ -678,6 +690,7 @@ namespace IngameScript {
 
                     bool LG_Ready = false;
                     bool Con_Ready = false;
+                    bool Con_Locked = false;
 
                     foreach (var gear in LG) {
                         if (gear.LockMode != LandingGearMode.Unlocked) {
@@ -690,6 +703,8 @@ namespace IngameScript {
                         foreach (var Con in BConn) {
                             if (Con.Status != MyShipConnectorStatus.Unconnected) {
                                 Con_Ready = true;
+                                if (Con.Status == MyShipConnectorStatus.Connected)
+                                    Con_Locked = true;
                                 break;
                             }
                         }
@@ -697,6 +712,8 @@ namespace IngameScript {
                         foreach (var Con in TConn) {
                             if (Con.Status != MyShipConnectorStatus.Unconnected) {
                                 Con_Ready = true;
+                                if (Con.Status == MyShipConnectorStatus.Connected)
+                                    Con_Locked = true;
                                 break;
                             }
                         }
@@ -708,17 +725,18 @@ namespace IngameScript {
                     }
 
                     if (LG_Ready && Con_Ready) {
-                        foreach (var gear in LG)
-                            gear.Lock();
-                        foreach (var Con in BConn)
-                            Con.Connect();
+                        foreach (var gear in LG) gear.Lock();
+                        foreach (var Con in TConn) Con.Connect();
+                        foreach (var Con in BConn) Con.Connect();
 
-                        CCPB.First()?.TryRun("cc_off");
-                        EnableBlockList(Thr, false);
-                        foreach (var batteryBlock in Batt)
-                            batteryBlock.ChargeMode = ChargeMode.Recharge;
-                        //TODO , turn off CC, batteries to recharge.
-                        CurState = "Idle";
+                        if (Con_Locked) {
+                            CCPB.First()?.TryRun("cc_off");
+                            //EnableBlockList(Thr, false);
+                            foreach (var batteryBlock in Batt)
+                                batteryBlock.ChargeMode = ChargeMode.Recharge;
+                            //TODO , turn off CC, batteries to recharge.
+                            CurState = "Idle";
+                        }
                     }
 
                     break;
