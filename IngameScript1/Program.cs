@@ -255,13 +255,11 @@ namespace IngameScript {
             TCVel = Math.Abs(float.Parse(SettingsDictionary["Upward Cruise Speed [m/s]"]));
             BCVel = Math.Abs(float.Parse(SettingsDictionary["Downward Cruise Speed [m/s]"]));
 
-
             if (RescanBlocksSuccess) {
                 Log.Add("Blocks rescanned success.");
             } else {
                 Log.Add("Blocks rescan failed!");
             }
-
             
         }
 
@@ -621,10 +619,12 @@ namespace IngameScript {
                         EnableBlockList(CCPB);
                         CCPB.First()?.TryRun("cc_on"); // Turn on CC
                         CCPB.First()?.TryRun("axis_v"); //Set to vertical
-                        CCPB.First()?.TryRun("setspeed 0"); //Hold in place in preparation for departure
 
-                        EnableBlockList(LiftIntent == "up" ? TPSens : BPSens); // :O
+
+                        EnableBlockList(LiftIntent == "up" ? TPSens : BPSens);//Parking
+                        EnableBlockList(LiftIntent == "up" ? TASens : BASens);//Approach
                     }
+                        CCPB.First()?.TryRun("setspeed " + (LiftIntent == "up" ? "0" : "10")); //Hold in place in preparation for departure
 
                     bool doorsClosed = true; //Assumption that neated later via AND gate.
                     foreach (var batt in Batt) {
@@ -673,7 +673,7 @@ namespace IngameScript {
 
                 case "Cruise": //Cruise downwards
                     if (LastState != CurState) {
-                        Runtime.UpdateFrequency = UpdateFrequency.Update1;
+                        Runtime.UpdateFrequency = UpdateFrequency.Update10;
 
                         EnableBlockList(Thr);
                         EnableBlockList(Batt);
@@ -717,7 +717,7 @@ namespace IngameScript {
                     break;
 
                 case "Approach": //Approach bottom floor
-                    Runtime.UpdateFrequency = UpdateFrequency.Update1;
+                    Runtime.UpdateFrequency = UpdateFrequency.Update10;
 
                     if (LastState != CurState) {
                         SetSensors(TPSens, TPDist);
