@@ -184,7 +184,7 @@ namespace IngameScript {
                 if (CustomData.ContainsKey(Setting.Key)) {
                     CustomDataSettings.Add(Setting.Key, CustomData[Setting.Key]);
                 } else {
-                    CustomData.Add(Setting.Key, Setting.Value);
+                    CustomDataSettings.Add(Setting.Key, Setting.Value);
                     Block.CustomData += "\n" + Setting.Key + " = " + Setting.Value;
                 }
             }
