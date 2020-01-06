@@ -1,5 +1,4 @@
-﻿// Set MagLev distance to 1.22m
-// Set MagLev power to 4M KN
+﻿
 using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI.Ingame;
 using Sandbox.ModAPI.Interfaces;
@@ -38,6 +37,8 @@ using IMyThrust = Sandbox.ModAPI.Ingame.IMyThrust;
 
 namespace IngameScript {
     class Program : MyGridProgram {
+        // Set MagLev distance to 1.22m
+        // Set MagLev power to 4M KN
         // Go to:
         // https://github.com/malware-dev/MDK-SE/wiki/Quick-Introduction-to-Space-Engineers-Ingame-Scripts
         //
