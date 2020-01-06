@@ -1,4 +1,6 @@
-﻿using Sandbox.Game.EntityComponents;
+﻿// Set MagLev distance to 1.22m
+// Set MagLev power to 4M KN
+using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI.Ingame;
 using Sandbox.ModAPI.Interfaces;
 using SpaceEngineers.Game.ModAPI.Ingame;
