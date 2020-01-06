@@ -47,24 +47,30 @@ namespace IngameScript {
         public List<IMyShipConnector> TConn = new List<IMyShipConnector>(); //Top Connector
         public List<IMyShipConnector> BConn = new List<IMyShipConnector>(); //Bottom Connector
         public List<IMyProgrammableBlock> CCPB = new List<IMyProgrammableBlock>(); //Cruise control Programming Block
+
         /// <summary>Top Cruise Velocity</summary>
         public float TCVel;
+
         /// <summary>Bottom Cruise Velocity</summary>
         public float BCVel;
+
         /// <summary>Top Approach Velocity</summary>
         public float TAVel;
+
         /// <summary>Bottom Approach Velocity</summary>
         public float BAVel;
+
         /// <summary>Parking Velocity</summary>
         public float PVel;
+
         public List<IMySensorBlock> TASens; //Top facing approach sensor
-        public float TADist;//Top Approach Distance
+        public float TADist; //Top Approach Distance
         public List<IMySensorBlock> TPSens; //Top facing approach sensor
-        public float TPDist;//Top Parking Distance
+        public float TPDist; //Top Parking Distance
         public List<IMySensorBlock> BASens; //Bottom facing parking sensor
-        public float BADist;//Bottom Approach Distance
+        public float BADist; //Bottom Approach Distance
         public List<IMySensorBlock> BPSens; //Bottom facing parking sensor
-        public float BPDist;//bottom Parking Distance
+        public float BPDist; //bottom Parking Distance
         public List<IMySensorBlock> PSens; //Cabin Sensor (People)
         public List<IMyDoor> TDoor = new List<IMyDoor>(); //Top Doors
         public List<IMyDoor> BDoor = new List<IMyDoor>(); //Bottom Doors
@@ -107,12 +113,15 @@ namespace IngameScript {
         public LogEngine Log;
 
         public bool DebugMode;
+
         /// <summary>
         /// Main state machine - current state
         /// </summary>
         public string CurState;
+
         public string CurStateTemp; //temporary state storage to workaround the last state dependent actions in main state machine
         public string LastState;
+
         /// <summary>
         /// The direction the lift commanded to go
         /// </summary>
@@ -195,7 +204,6 @@ namespace IngameScript {
         public bool FilterThis(IMyTerminalBlock block) { return block.CubeGrid == Me.CubeGrid; }
 
         void RescanBlocks() {
-
             SettingsDictionary = ParseCustomData(Me, SettingsDictionary);
 
             DebugMode = SettingsDictionary["Debug Print"].ToLower().Contains("true");
@@ -260,11 +268,11 @@ namespace IngameScript {
             } else {
                 Log.Add("Blocks rescan failed!");
             }
-            
         }
 
         public List<T> GetSpecificTypeBlocksByPattern<T>(string dicIndex) where T : IMyTerminalBlock {
-            if (DebugMode) Log.Add("Pattern search started/nlooking for" + dicIndex + "/nof type" + typeof(T));
+            if (DebugMode)
+                Log.Add("Pattern search started/nlooking for" + dicIndex + "/nof type" + typeof(T));
             List<T> Temp = new List<T>();
             try {
                 if (SettingsDictionary[dicIndex].Length > 0) {
@@ -279,7 +287,9 @@ namespace IngameScript {
             } catch (Exception e) {
                 Temp = GetAnyBlocksByPattern(dicIndex).Where(block => block is T).Cast<T>().ToList();
             }
-            if (DebugMode) Log.Add("Found " + Temp.Count + " items.");
+
+            if (DebugMode)
+                Log.Add("Found " + Temp.Count + " items.");
             return Temp;
         }
 
@@ -332,10 +342,10 @@ namespace IngameScript {
         }
 
         public bool EnableBlockList<T>(List<T> BlockList, bool State = true) where T : IMyFunctionalBlock {
-            bool Success = false;//assume failure result
-            foreach (var block in BlockList) { 
+            bool Success = false; //assume failure result
+            foreach (var block in BlockList) {
                 block.Enabled = State;
-                Success = true;//Any block enabled
+                Success = true; //Any block enabled
             }
 
             return Success;
@@ -370,7 +380,7 @@ namespace IngameScript {
         }
 
         public bool SetSensors<T>(List<T> Sensors, float Dist = 50f) where T : IMySensorBlock {
-            Dist = Math.Min(50f, Math.Max(1.5f, Dist));// 1.5~50
+            Dist = Math.Min(50f, Math.Max(1.5f, Dist)); // 1.5~50
             try {
                 Sensors.First().Enabled = true;
 
@@ -458,8 +468,6 @@ namespace IngameScript {
                     }
 
                     break;
-                case UpdateType.Antenna:
-                    break;
                 case UpdateType.Mod:
                     break;
                 case UpdateType.Script:
@@ -480,8 +488,8 @@ namespace IngameScript {
                             //Iteration = RescanBlocksSuccess ? Iteration : 3;
                             break;
                         case 1:
-                            //ConfigBlocks();
-                            //break;
+                        //ConfigBlocks();
+                        //break;
                         default:
                             Log.Add("NOP.");
                             break;
@@ -523,6 +531,7 @@ namespace IngameScript {
                             LiftIntent = "up";
                         }
                     }
+
                     //check sensors, go to nearest floor
                     //Parking
                     if (SetSensors(TPSens, 50) && SetSensors(BPSens, 50)) {
@@ -564,18 +573,19 @@ namespace IngameScript {
                     Runtime.UpdateFrequency = UpdateFrequency.Update100;
                     RescanBlocks();
 
-                    EnableBlockList(Batt);//recharge if connected
-                    if (TConn.First().Status==MyShipConnectorStatus.Connected || BConn.First().Status == MyShipConnectorStatus.Connected) {
-                        foreach (var batt in Batt) batt.ChargeMode = ChargeMode.Recharge; 
+                    EnableBlockList(Batt); //recharge if connected
+                    if (TConn.First().Status == MyShipConnectorStatus.Connected || BConn.First().Status == MyShipConnectorStatus.Connected) {
+                        foreach (var batt in Batt)
+                            batt.ChargeMode = ChargeMode.Recharge;
                     }
-                    
+
 
                     if (LastState != CurState) { //State running first time.
                         EnableBlockList(BDoor);
                         EnableBlockList(TDoor);
                         EnableBlockList(PSens);
                         SetPassengerSensors(PSens);
-                        EnableBlockList(Thr,false);
+                        EnableBlockList(Thr, false);
                     }
 
                     foreach (var gear in LG)
@@ -621,10 +631,11 @@ namespace IngameScript {
                         CCPB.First()?.TryRun("axis_v"); //Set to vertical
 
 
-                        EnableBlockList(LiftIntent == "up" ? TPSens : BPSens);//Parking
-                        EnableBlockList(LiftIntent == "up" ? TASens : BASens);//Approach
+                        EnableBlockList(LiftIntent == "up" ? TPSens : BPSens); //Parking
+                        EnableBlockList(LiftIntent == "up" ? TASens : BASens); //Approach
                     }
-                        CCPB.First()?.TryRun("setspeed " + (LiftIntent == "up" ? "0" : "10")); //Hold in place in preparation for departure
+
+                    CCPB.First()?.TryRun("setspeed " + (LiftIntent == "up" ? "0" : "10")); //Hold in place in preparation for departure
 
                     bool doorsClosed = true; //Assumption that neated later via AND gate.
                     foreach (var batt in Batt) {
@@ -632,12 +643,12 @@ namespace IngameScript {
                     }
 
 
-                    if (PSens.First().IsActive) {//People in the vicinity, open correct doors
+                    if (PSens.First().IsActive) { //People in the vicinity, open correct doors
                         if (TConn.First().Status != MyShipConnectorStatus.Unconnected) { //Is on top
                             foreach (var door in TDoor) {
                                 door.OpenDoor();
                             }
-                        } else if (BConn.First().Status != MyShipConnectorStatus.Unconnected) {//Is on botom
+                        } else if (BConn.First().Status != MyShipConnectorStatus.Unconnected) { //Is on botom
                             foreach (var door in BDoor) {
                                 door.OpenDoor();
                             }
@@ -646,7 +657,7 @@ namespace IngameScript {
                         }
 
                         doorsClosed = false; //Hold departure
-                    } else { 
+                    } else {
                         foreach (var door in TDoor) {
                             door.CloseDoor();
                             doorsClosed &= (door.Status == DoorStatus.Closed);
@@ -660,8 +671,10 @@ namespace IngameScript {
 
                     if (doorsClosed) {
                         CurState = "Cruise";
-                        foreach (var connector in TConn) connector.Disconnect();
-                        foreach (var connector in BConn) connector.Disconnect();
+                        foreach (var connector in TConn)
+                            connector.Disconnect();
+                        foreach (var connector in BConn)
+                            connector.Disconnect();
                         foreach (var lg in LG) {
                             lg.AutoLock = false;
                             lg.Unlock();
@@ -691,8 +704,10 @@ namespace IngameScript {
                             gear.Enabled = false;
                         }
 
-                        foreach (var conn in TConn) conn.Disconnect();
-                        foreach (var conn in BConn) conn.Disconnect();
+                        foreach (var conn in TConn)
+                            conn.Disconnect();
+                        foreach (var conn in BConn)
+                            conn.Disconnect();
 
                         SetSensors(TASens, TADist);
                         SetSensors(BASens, BADist);
@@ -711,9 +726,11 @@ namespace IngameScript {
                         CCPB.First()?.TryRun("setspeed " + (LiftIntent == "up" ? TCVel : -BCVel));
                     }
 
-                    if (LiftIntent == "up" && TASens.First().IsActive) CurState = "Approach";
-                    if (LiftIntent == "down" && BASens.First().IsActive) CurState = "Approach";
-                    
+                    if (LiftIntent == "up" && TASens.First().IsActive)
+                        CurState = "Approach";
+                    if (LiftIntent == "down" && BASens.First().IsActive)
+                        CurState = "Approach";
+
                     break;
 
                 case "Approach": //Approach bottom floor
@@ -736,10 +753,9 @@ namespace IngameScript {
                             door.CloseDoor();
                         foreach (var door in BDoor)
                             door.CloseDoor();
-
                     } else {
                         if (LiftIntent == "up" && TPSens.First().IsActive ||
-                            LiftIntent == "down" && BPSens.First().IsActive ) {
+                            LiftIntent == "down" && BPSens.First().IsActive) {
                             //Is active AND in right direction?
                             CurState = "Parking";
                         }
@@ -805,9 +821,12 @@ namespace IngameScript {
                     }
 
                     if (LG_Ready && Con_Ready) {
-                        foreach (var gear in LG) gear.Lock();
-                        foreach (var Con in TConn) Con.Connect();
-                        foreach (var Con in BConn) Con.Connect();
+                        foreach (var gear in LG)
+                            gear.Lock();
+                        foreach (var Con in TConn)
+                            Con.Connect();
+                        foreach (var Con in BConn)
+                            Con.Connect();
 
                         if (Con_Locked) {
                             CCPB.First()?.TryRun("cc_off");
